@@ -29,6 +29,7 @@ from scipy.spatial import Delaunay
 from odemis import model, dataio
 from odemis.acq import acqmng
 from odemis.acq.align.autofocus import MeasureOpticalFocus, AutoFocus, MTD_EXHAUSTIVE
+from odemis.acq.align.roi_autofocus import autofocus_in_roi, estimate_autofocus_in_roi_time
 from odemis.acq.stitching._constants import WEAVER_MEAN, REGISTER_IDENTITY, REGISTER_GLOBAL_SHIFT
 from odemis.acq.stitching._simple import register, weave
 from odemis.acq.stream import Stream, EMStream, ARStream, \
@@ -156,7 +157,8 @@ class TiledAcquisitionTask(object):
             self._init_zlevels = zlevels  # zlevels can be relative, therefore keep track of the initial zlevels
 
         if len(self._zlevels) > 1 and focusing_method != FocusingMethod.MAX_INTENSITY_PROJECTION:
-            raise NotImplementedError("Multiple zlevels currently only works with focusing method MAX_INTENSITY_PROJECTION")
+            raise NotImplementedError(
+                "Multiple zlevels currently only works with focusing method MAX_INTENSITY_PROJECTION")
 
         # For "ON_LOW_FOCUS_LEVEL" method: a focus level which is corresponding to a in-focus image.
         self._good_focus_level = None  # float
@@ -540,7 +542,8 @@ class TiledAcquisitionTask(object):
 
         if self._future._task_state == CANCELLED:
             raise CancelledError()
-        logging.debug(f"Zstack acquisition for tile {ix}x{iy}, stream {stream.name} finished, compressing data into a single image.")
+        logging.debug(
+            f"Zstack acquisition for tile {ix}x{iy}, stream {stream.name} finished, compressing data into a single image.")
         # Convert zstack into a cube
         fm_cube = assembleZCube(zstack, self._zlevels)
         # Save the cube on disk if a log path exists
@@ -740,8 +743,8 @@ class TiledAcquisitionTask(object):
             # Run autofocus if current focus got worse than permitted deviation,
             # or it was very bad (0) originally.
             if (self._good_focus_level != 0 and
-                (self._good_focus_level - current_focus_level) / self._good_focus_level < FOCUS_FIDELITY
-               ):
+                    (self._good_focus_level - current_focus_level) / self._good_focus_level < FOCUS_FIDELITY
+            ):
                 return das
         elif self._focusing_method == FocusingMethod.ALWAYS:
             pass
@@ -900,3 +903,184 @@ def acquireTiledArea(streams, stage, area, overlap=0.2, settings_obs=None, log_p
     executeAsyncTask(future, task.run)
 
     return future
+
+
+def acquireOverview(streams, stage, area, roi, overlap=0.2, settings_obs=None, log_path=None, zlevels=None,
+                    registrar=REGISTER_GLOBAL_SHIFT, weaver=WEAVER_MEAN, focusing_method=FocusingMethod.NONE,
+                    focus_points=None):
+    """
+    Start a tiled acquisition task for the given streams (SEM or FM) in order to
+    build a complete view of the TEM grid. Needed tiles are first acquired for
+    each stream, then the complete view is created by stitching the tiles.
+
+    Parameters are the same as for TiledAcquisitionTask
+    :return: (ProgressiveFuture) an object that represents the task, allow to
+        know how much time before it is over and to cancel it. It also permits
+        to receive the result of the task, which is a list of model.DataArray:
+        the stitched acquired tiles data
+    """
+    # Create a progressive future with running sub future
+    future = model.ProgressiveFuture()
+    future.running_subf = model.InstantaneousFuture()
+    future._task_lock = threading.Lock()
+
+    task = AcquireOverviewTask(streams, stage, area, roi, focus, n_tiles, future, overlap=0.2, settings_obs=None,
+                               log_path=None, zlevels=None,
+                               registrar=REGISTER_GLOBAL_SHIFT, weaver=WEAVER_MEAN, focusing_method=FocusingMethod.NONE)
+    future.task_canceller = task._cancelAcquisition  # let the future cancel the task
+    # Estimate memory and check if it's sufficient to decide on running the task
+    mem_sufficient, mem_est = task.estimateMemory()
+    if not mem_sufficient:
+        raise IOError("Not enough RAM to safely acquire the overview: %g GB needed" % (mem_est / 1024 ** 3,))
+
+    future.set_progress(end=task.estimateTime() + time.time())
+    # connect the future to the task and run in a thread
+    executeAsyncTask(future, task.run)
+
+    return future
+
+
+class AcquireOverviewTask(object):
+    """
+    Copied from class ZStackAcquisitionTask(object):
+    """
+
+    def __init__(self, streams, stage, area, roi, focus, n_tiles, future, overlap=0.2, settings_obs=None, log_path=None,
+                 zlevels=None,
+                 registrar=REGISTER_GLOBAL_SHIFT, weaver=WEAVER_MEAN, focusing_method=FocusingMethod.NONE):
+        # site and feature means the same
+        self._stage = stage
+        self._future = future
+        self.streams = streams
+        self.area = area
+        self._rois = roi  # list of roi
+        self._ccd = None  # TODO to delete after ccd.data components is used from streams in do_autofocus_roi
+        self._focus = focus
+        self.focus_rng = self._focus.getMetadata().get(model.MD_POS_ACTIVE_RANGE, None)
+        if self.focus_rng is None:
+            # METEOR is running
+            self.focus_rng = self._focus.getMetadata().get(
+                model.MD_SAFE_REL_RANGE)  # this value should be there, none should not be returned
+            self.focus_rng = (
+            self.focus_rng[0] + self._focus.position.value, self.focus_rng[1] + self._focus.position.value)
+        self._n_tiles = n_tiles
+        self.conf_level = 0  # TODO find out the confidence level threshold
+        self.focusing_method = focusing_method
+
+    def cancel(self, future):
+        """
+        Canceler of acquisition task.
+        """
+        logging.debug("canceling acquisition overview...")
+
+        with future._task_lock:
+            if future._task_state == FINISHED:
+                return False
+            future._task_state = CANCELLED
+            future.running_subf.cancel()
+            logging.debug("acquisition overview cancelled.")
+        return True
+
+    def estimate_time(self, roi_idx=0, actual_time_per_roi=None):
+        """
+        :param site_idx:
+        :param actual_time_per_site:
+        :return:
+        """
+        """
+        Estimates the milling time for the given feature.
+        :return (Float > 0): the estimated time
+        """
+        if len(self._rois) == 0:
+            logging.debug("roi location is not provided by the user, cancelling the acquisition overview")
+            self._future._task_state = CANCELLED
+            raise CancelledError()
+
+        remaining_rois = (len(self._rois) - roi_idx)
+
+        if actual_time_per_roi:
+            acquisition_time = actual_time_per_roi * remaining_rois
+        else:
+            acquisition_time = estimate_autofocus_in_roi_time(self._n_tiles[0], self._n_tiles[1], self._ccd) * remaining_rois
+
+        return acquisition_time
+
+    def run(self):
+        """
+        The main function of the task class, which will be called by the future asynchronously
+
+        """
+        if not self._future:
+            return
+        self._future._task_state = RUNNING
+
+        try:
+            actual_time_per_roi = None
+            if len(self._rois) == 0:
+                logging.debug("roi location is not provided by the user, cancelling the acquisition overview")
+                self._future._task_state = CANCELLED
+                raise CancelledError()
+
+            # create a for loop for roi to create sub futures
+            for idx, roi in enumerate(self._rois):
+                # Update progress on the milling sites left
+                start_time = time.time()
+                remaining_t = self.estimate_milling_time(idx, actual_time_per_roi)
+                self._future.set_end_time(time.time() + remaining_t)
+
+                # cancel the sub future
+                if self._future._task_state == CANCELLED:
+                    raise CancelledError()
+
+                # run autofocus for the selected roi
+                focus_points = None  # list of [x, y, z] focus points
+                # TODO to check if the autofocus is selected by the user
+                if self.focusing_method == AUTOFOCUS_ROI:
+                    self._future.running_subf = autofocus_in_roi(
+                        roi, self._stage, self._ccd, self._focus,
+                        self.focus_rng,
+                        self._n_tiles[0], self._n_tiles[1],
+                        self.conf_level)
+
+                    logging.debug(f"Autofocus is running for roi number {idx} with {roi} values")
+
+                    try:
+                        focus_points = self._future.running_subf.result()  # timeout error can be used
+                    except Exception as exp:
+                        logging.exception(
+                            f"Autofocus within roi failed for roi number {idx} with {roi} values due to {exp}")
+                        self._future.running_subf.cancel()
+                        logging.debug("cancelling the acquisition overview")
+                        self._future._task_state = CANCELLED
+                        raise CancelledError()
+
+
+                # run tiled acquisition for the selected roi
+                self._future.running_subf = acquireTiledArea(self.streams, self._stage, self.area, overlap=0.2, settings_obs=None, log_path=None, zlevels=None,
+                     registrar=REGISTER_GLOBAL_SHIFT, weaver=WEAVER_MEAN, focusing_method=FocusingMethod.NONE,
+                     focus_points=focus_points)
+                logging.debug(f"Z-stack acquisition is running for roi number {idx} with {roi} values")
+                try:
+                    self._future.running_subf.result()
+                except Exception as exp:
+                    logging.exception(
+                        f"Z-stack acquisition within roi failed for roi number {idx} with {roi} values due to {exp}")
+                    self._future.running_subf.cancel()
+                    logging.debug("cancelling the acquisition overview")
+                    self._future._task_state = CANCELLED
+                    raise CancelledError()
+
+                logging.debug(f"acquisition overview is completed for roi number {idx} with {roi} values")
+
+                # Store the actual time during acquisition one roi
+                actual_time_per_roi = time.time() - start_time
+
+        except CancelledError:
+            logging.debug("Stopping because acquisition overview was cancelled")
+            raise
+        except Exception:
+            logging.exception(f"acquisition overview failed")
+        finally:
+            # state that the future has finished
+            with self._future._task_lock:
+                self._future._task_state = FINISHED
