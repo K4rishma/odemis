@@ -905,9 +905,8 @@ def acquireTiledArea(streams, stage, area, overlap=0.2, settings_obs=None, log_p
     return future
 
 
-def acquireOverview(streams, stage, area, roi, overlap=0.2, settings_obs=None, log_path=None, zlevels=None,
-                    registrar=REGISTER_GLOBAL_SHIFT, weaver=WEAVER_MEAN, focusing_method=FocusingMethod.NONE,
-                    focus_points=None):
+def acquireOverview(streams, stage, area, roi, focus, n_tiles, overlap=0.2, settings_obs=None, log_path=None, zlevels=None,
+                    registrar=REGISTER_GLOBAL_SHIFT, weaver=WEAVER_MEAN, focusing_method=FocusingMethod.NONE):
     """
     Start a tiled acquisition task for the given streams (SEM or FM) in order to
     build a complete view of the TEM grid. Needed tiles are first acquired for
@@ -1084,3 +1083,5 @@ class AcquireOverviewTask(object):
             # state that the future has finished
             with self._future._task_lock:
                 self._future._task_state = FINISHED
+
+        return focus_points
