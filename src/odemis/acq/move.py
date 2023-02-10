@@ -309,19 +309,17 @@ def getCurrentAlignerPositionLabel(current_pos, align):
     return UNKNOWN
 
 
-# TODO for now this function is hardcoded to work only for rm and rx. Handle
-# also the ry axis to make the function generic
 def _getDistance(start, end):
     """
-    Calculate the error/difference between two 3D postures with x, y, z, rx, rm axes
-        or a subset of these axes. If there are no common axes between the two passed
-        postures, an error would be raised. The scaling factor of the rotation error is in meter.
+    Calculate the difference between two 3D postures with x, y, z, rx, ry, rz axes
+    or a subset of these axes. If there are no common axes between the two passed
+    postures, an error would be raised. The scaling factor of the rotation error is in meter.
     start, end (dict -> float): a 3D posture
     return (float >= 0): the difference between two 3D postures.
     """
     axes = start.keys() & end.keys()
     lin_axes = axes & {'x', 'y', 'z'}  # only the axes found on both points
-    rot_axes = axes & {'rx', 'rm'}  # only the axes found on both points
+    rot_axes = axes & {'rx', 'ry', 'rz'}  # only the axes found on both points
     if not lin_axes and not rot_axes:
         raise ValueError("No common axes found between the two postures")
     lin_error = rot_error = 0
@@ -330,46 +328,13 @@ def _getDistance(start, end):
         sp = numpy.array([start[a] for a in sorted(lin_axes)])
         ep = numpy.array([end[a] for a in sorted(lin_axes)])
         lin_error = scipy.spatial.distance.euclidean(ep, sp)
-    # for the rotation error
-    if rot_axes:
-        Rx_start = Rx_end = Rm_start = Rm_end = numpy.eye(3)
-        for a in rot_axes:
-            if a == "rx":
-                # find the elemental rotation around x axis
-                Rx_start = getRotationMatrix(a, start["rx"])
-                Rx_end = getRotationMatrix(a, end["rx"])
-            elif a == "rm":
-                # find the elemental rotation around z axis
-                Rm_end = getRotationMatrix(a, end["rm"])
-                Rm_start = getRotationMatrix(a, start["rm"])
-        # find the total rotations
-        R_start = numpy.matmul(Rm_start, Rx_start)
-        R_end = numpy.matmul(Rm_end, Rx_end)
-        # find the rotation error matrix
-        R_diff = numpy.matmul(numpy.transpose(R_start), R_end)
-        # map to scalar error
-        rot_error = SCALING_FACTOR * abs(numpy.trace(numpy.eye(3) - R_diff))
+
+    # for the rotation error: just the sum of all rotations
+    rot_dist = sum(abs(util.rot_shortest_move(start[a], end[a])) for a in rot_axes)
+    # Convert to a value which has the same order of magnitude as linear distances (in a microscope)
+    rot_error = ROT_DIST_SCALING_FACTOR * rot_dist
+
     return lin_error + rot_error
-
-
-def getRotationMatrix(axis, angle):
-    """
-    Computes the rotation matrix of the given angle around the given axis. 
-    axis (str): the axis around which the rotation matrix is to be calculated. The axis can be 'rx', 'ry' or 'rm'.
-    angle (float): the angle of rotation. The angle must be in radians.
-    return (numpy.ndarray): the rotation matrix. It is 3x3 matrix of floats.
-    """
-    if axis == "rx":
-        Rx = numpy.array([[1, 0, 0], [0, numpy.cos(angle), -numpy.sin(angle)], [0, numpy.sin(angle), numpy.cos(angle)]])
-        return Rx
-    elif axis == "ry":
-        Ry = numpy.array([[numpy.cos(angle), 0, numpy.sin(angle)], [0, 1, 0], [-numpy.sin(angle), 0, numpy.cos(angle)]])
-        return Ry
-    elif axis == "rm":
-        Rm = numpy.array([[numpy.cos(angle), -numpy.sin(angle), 0], [numpy.sin(angle), numpy.cos(angle), 0], [0, 0, 1]])
-        return Rm
-    else:
-        raise ValueError(f"Unknown axis name {axis}")
 
 
 def getMovementProgress(current_pos, start_pos, end_pos):
@@ -433,7 +398,7 @@ def _isNearPosition(current_pos, target_position, axes):
         target_value = target_position[axis]
         if axis in {'x', 'y', 'z'}:
             is_near = abs(target_value - current_value) < ATOL_LINEAR_POS
-        elif axis in {'rx', 'rm'}:
+        elif axis in {'rx', 'ry', 'rz'}:
             is_near = util.rot_almost_equal(current_value, target_value, atol=ATOL_ROTATION_POS)
         else:
             raise ValueError("Unknown axis value %s." % axis)
@@ -581,7 +546,6 @@ def _doCryoSwitchSamplePosition(future, target):
 
     try:
         if role == "enzel":
-            #TODO enzel code broken as rm is used in other functions insteas of rz
             # get the stage and aligner objects
             stage = model.getComponent(role='stage')
             align = model.getComponent(role='align')
@@ -598,14 +562,14 @@ def _doCryoSwitchSamplePosition(future, target):
             align_deactive = align_md[model.MD_FAV_POS_DEACTIVE]
             stage_referenced = all(stage.referenced.value.values())
             # Fail early when required axes are not found on the positions metadata
-            required_axes = {'x', 'y', 'z', 'rx', 'rm'}
+            required_axes = {'x', 'y', 'z', 'rx', 'rz'}
             for stage_position in target_pos.values():
                 if not required_axes.issubset(stage_position.keys()):
                     raise ValueError("Stage %s metadata does not have all required axes %s." % (
                     list(stage_md.keys())[list(stage_md.values()).index(stage_position)], required_axes))
             current_pos = stage.position.value
             # To hold the sub moves to run if normal ordering failed
-            fallback_submoves = [{'x', 'y', 'z'}, {'rx', 'rm'}]
+            fallback_submoves = [{'x', 'y', 'z'}, {'rx', 'rz'}]
 
             current_label = getCurrentPositionLabel(current_pos, stage)
             current_name = POSITION_NAMES[current_label]
@@ -635,17 +599,17 @@ def _doCryoSwitchSamplePosition(future, target):
                     # After referencing the stage could move near the maximum axes range,
                     # and moving single axes may result in an invalid/reachable position error,
                     # so all linear axes will be moved together for this special case.
-                    sub_moves = [{'x', 'y', 'z'}, {'rx', 'rm'}]
+                    sub_moves = [{'x', 'y', 'z'}, {'rx', 'rz'}]
                 else:
                     # Notes on the movement on the typical case:
                     # - Moving each linear axis separately to be easily trackable by the user from the chamber cam.
                     # - Moving X first is a way to move it to a safe position, as it's not affected by the rx
-                    # (and rm is typically always 0). Moreover, X is the largest move, and so it'll be
+                    # (and rz is typically always 0). Moreover, X is the largest move, and so it'll be
                     # "around" the loading position.
                     # - The X/Y/Z movement is in the Rx referential. So if the rx is tilted (eg, we are in IMAGING),
                     # and Y/Z are far from the pivot point, we have a good chance of hitting something.
                     # Moving along X should always be safe (as Rx is not affected by this axis position).
-                    sub_moves = [{'x'}, {'y'}, {'z'}, {'rx', 'rm'}]
+                    sub_moves = [{'x'}, {'y'}, {'z'}, {'rx', 'rz'}]
 
             elif target in (ALIGNMENT, IMAGING, SEM_IMAGING, COATING, THREE_BEAMS):
                 if current_label is LOADING:
@@ -662,9 +626,9 @@ def _doCryoSwitchSamplePosition(future, target):
                 if current_label == LOADING:
                     # As moving from loading position requires re-referencing the stage, move linked axes (y & z)
                     # together to prevent invalid/reachable position error
-                    sub_moves = [{'y', 'z'}, {'rx', 'rm'}, {'x'}]
+                    sub_moves = [{'y', 'z'}, {'rx', 'rz'}, {'x'}]
                 else:
-                    sub_moves = [{'z'}, {'y'}, {'rx', 'rm'}, {'x'}]
+                    sub_moves = [{'z'}, {'y'}, {'rx', 'rz'}, {'x'}]
             else:
                 raise ValueError(f"Unsupported move to target {target_name}")
 
@@ -749,40 +713,22 @@ def _doCryoSwitchSamplePosition(future, target):
                     if not _isNearPosition(focus.position.value, focus_deactive, focus.axes):
                         sub_moves.append((focus, focus_deactive))
                     sub_moves.append((stage, filter_dict({'x', 'y', 'z'}, target_pos_sem)))
-                    sub_moves.append((stage, filter_dict({'rx', 'rm'}, target_pos_sem)))
+                    sub_moves.append((stage, filter_dict({'rx', 'rz'}, target_pos_sem)))
 
             if target in (GRID_1, GRID_2):
                 # The current mode doesn't change. Only X/Y/Z should move (typically
                 # only X/Y).
-                # It could be both SEM and FM position # TODO check
-                # TODO How to work Linked YM position and its associated not used METADATA POS_COR, CALIB_VAL
-                sub_moves.append((stage, filter_dict({'x', 'y', 'm'}, target_pos)))
-                # x, y, m
-
+                sub_moves.append((stage, filter_dict({'x', 'y', 'z'}, target_pos)))
             elif target in (LOADING, SEM_IMAGING, FM_IMAGING):
-                # pass # TODO be sure to remove this
                 # Park the focuser for safety
                 if not _isNearPosition(focus.position.value, focus_deactive, focus.axes):
                     sub_moves.append((focus, focus_deactive))
 
-                if target in (LOADING, SEM_IMAGING):
-                    # when switching from FM to SEM
-                    # move in the following order
-                    # (optional reset z), x, rx, rm, y, m, (original z)
-                    sub_moves.append((stage, filter_dict({'x'}, target_pos)))
-                    sub_moves.append((stage, filter_dict({'rx'}, target_pos)))
-                    sub_moves.append((stage, filter_dict({'rm'}, target_pos)))
-                    sub_moves.append((stage, filter_dict({'y'}, target_pos)))
-                    sub_moves.append((stage, filter_dict({'m'}, target_pos)))
+                # Move translation axes, then rotational ones
+                sub_moves.append((stage, filter_dict({'x', 'y', 'z'}, target_pos)))
+                sub_moves.append((stage, filter_dict({'rx', 'rz'}, target_pos)))
+
                 if target == FM_IMAGING:
-                    # when switching from SEM to FM
-                    # move in the following order :
-                    # (optional reset z), m, y, rm, rx, x, (original z)
-                    sub_moves.append((stage, filter_dict({'m'}, target_pos)))
-                    sub_moves.append((stage, filter_dict({'y'}, target_pos)))
-                    sub_moves.append((stage, filter_dict({'rm'}, target_pos)))
-                    sub_moves.append((stage, filter_dict({'rx'}, target_pos)))
-                    sub_moves.append((stage, filter_dict({'x'}, target_pos)))
                     # Engage the focuser
                     sub_moves.append((focus, focus_active))
             else:
@@ -805,75 +751,40 @@ def _doCryoSwitchSamplePosition(future, target):
                 raise CancelledError()
             future._task_state = FINISHED
 
-# Note: this transformation consists of translation and rotation.
-# The translations are along the x, y and m axes. They are calculated based on
-# the current position and some calibrated values existing in metadata "CAL_VAL".
-# The rotations are 180 degree around the rm axis, and a calibrated angle around the rx axis.
-# These angles exist in the metadata "FM_POS_ACTIVE".
+# Note: this transformation consists of translation of along x and y
+# axes, and 7 degrees rotation around rx, and 180 degree rotation around rz.
+# The rotation angles are constant existing in "FM_POS_ACTIVE" metadata,
+# but the translation are calculated based on the current position and some
+# correction/shifting parameters existing in metadata "FM_POS_ACTIVE". 
+# This correction parameters can change every session. They are calibrated
+# at the beginning of each run.
 def transformFromSEMToMeteor(pos, stage):
     """
     Transforms the current stage position from the SEM imaging area to the 
         meteor/FM imaging area.
-    pos (dict str->float): the current stage position. The position has to have x, y, m, z, rx and rm axes,
+    pos (dict str->float): the current stage position. The position has to have x, y, rz, and rx axes,
         otherwise error would be raised.
     stage (Actuator): the stage component. The stage has to have metadata "MD_POS_COR" and "MD_FAV_FM_POS_ACTIVE"
-    return (dict str->float): the transformed position. It returns the updated axes x, y, m, z, rx, rm. The axis z is same as the input.
+    return (dict str->float): the transformed position. It returns the updated axes x, y, rx, rz. The axis z is same as the input.
     """
-    # TODO: Ask Eric?
-    # TODO: check the sign convention of the axes. The below axes convention is based on Zeiss stage system.
-    if not {"x", "y", "m", "z", "rx", "rm"}.issubset(stage.axes):
-        raise KeyError("The stage misses 'x', 'y', 'm', 'z', 'rx' or 'rm' axes")
+    if not {"x", "y", "rz", "rx"}.issubset(stage.axes):
+        raise KeyError("The stage misses 'x', 'y', 'rx' or 'rz' axes")
     stage_md = stage.getMetadata()
     transformed_pos = pos.copy()
-
-    # Call out calibrated values and stage tilt and rotation angles
-    calibrated_values = stage_md[model.MD_CAL_VAL]
+    pos_cor = stage_md[model.MD_POS_COR]
     fm_pos_active = stage_md[model.MD_FAV_FM_POS_ACTIVE]
-    sem_pos_active = stage_md[model.MD_FAV_SEM_POS_ACTIVE]
-
-    #todo uncomment below
-
-    # Check 'rm' value
-    # if not _isInRange(pos["rm"], [sem_pos_active["rm"] - 0.01, sem_pos_active["rm"] + 0.01], "rm"):
-    #     raise KeyError("The rotation axis does not have the correct value for the SEM/FM switch to work properly, "
-    #                    "please set it to", str(math.degrees(sem_pos_active["rm"])), "degrees")
-
-    # Define values that are used more than once
-    rx_sem = pos["rx"]  # Current tilt angle (can differ per point of interest)
-    rx_fm = fm_pos_active["rx"]  # Calibrated tilt angle, for imaging perpendicular to objective
-    b_0 = pos["z"] - calibrated_values["z_et"]
-    x_0 = calibrated_values["x"]
-    y_0 = calibrated_values["y"]
-    m_0 = calibrated_values["m"]
-
-    # Calculate the equivalent coordinates of the (0 degree tilt) calibrated position, at the SEM position stage tilt
-    sem_reference_pos_x = x_0
-    sem_reference_pos_y = y_0 + b_0*math.sin(rx_sem)
-    sem_reference_pos_m = m_0 + b_0*(math.cos(rx_sem) - 1)
-
-    # Calculate the equivalent coordinates of the calibrated position, at the FM position
-    fm_reference_pos_x = x_0 + calibrated_values["dx"]
-    fm_reference_pos_y = y_0 + calibrated_values["dy"] + b_0*math.sin(rx_fm)
-    fm_reference_pos_m = m_0 + b_0*(math.cos(rx_fm) - 1)
-
-    # Use the above reference positions to calculate the equivalent coordinates of the point of interest, at the FM position.
-    # Note that the 180 degree rotation is taken care of by swapping the +/- signs for x and y (wrt the m equation).
-    transformed_pos["x"] = fm_reference_pos_x + (sem_reference_pos_x - pos["x"])
-    transformed_pos["y"] = fm_reference_pos_y + (sem_reference_pos_y - pos["y"])
-    transformed_pos["m"] = fm_reference_pos_m + (pos["m"] - sem_reference_pos_m)
-
-    # Update the angles to the FM position angles
+    transformed_pos["x"] = 2 * pos_cor[0] - pos["x"]
+    transformed_pos["y"] = 2 * pos_cor[1] - pos["y"]
     transformed_pos.update(fm_pos_active)
-
-    # Return transformed_pos (containing the new x, y, m, rx, rm coordinates, as well as the unchanged z coordinate)
     return transformed_pos
 
 
-# Note: this transformation consists of translation and rotation.
-# The translations are along the x, y and m axes. They are calculated based on
-# the current position and some calibrated values existing in metadata "CAL_VAL".
-# The rotations are 180 degree around the rm axis, and a calibrated angle around the rx axis.
-# These angles exist in the metadata "FM_POS_ACTIVE" and "SEM_POS_ACTIVE".
+# Note: this transformation also consists of translation and rotation. 
+# The translation is along x and y axes. They are calculated based on
+# the current position and correction parameters which are calibrated every session.
+# The rotation angles are 180 degree around rz axis, and a rotation angle
+# around rx axis which should also be calibrated at the beginning of the run. 
+# The rx angle is actually the same as the milling angle. 
 def transformFromMeteorToSEM(pos, stage):
     """
     Transforms the current stage position from the meteor/FM imaging area
@@ -882,46 +793,16 @@ def transformFromMeteorToSEM(pos, stage):
     stage (Actuator): the stage component
     returns (dict str->float): the transformed stage position. 
     """
-    if not {"x", "y", "m", "z", "rx", "rm"}.issubset(stage.axes):
-        raise KeyError("The stage misses 'x', 'y', 'm', 'z', 'rx' or 'rm' axes")
+    if not {"x", "y", "rx", "rz"}.issubset(stage.axes):
+        raise KeyError("The stage misses 'x', 'y', 'rx' or 'rz' axes")
     stage_md = stage.getMetadata()
     transformed_pos = pos.copy()
-
-    # Call out calibrated values and stage tilt and rotation angles
-    calibrated_values = stage_md[model.MD_CAL_VAL]
-    fm_pos_active = stage_md[model.MD_FAV_FM_POS_ACTIVE]
+    pos_cor = stage_md[model.MD_POS_COR]
     sem_pos_active = stage_md[model.MD_FAV_SEM_POS_ACTIVE]
-
-    # Define values that are used more than once
-    rx_sem = sem_pos_active["rx"]
-    rx_fm = fm_pos_active["rx"]
-    b_0 = pos["z"] - calibrated_values["z_et"]
-    x_0 = calibrated_values["x"]
-    y_0 = calibrated_values["y"]
-    m_0 = calibrated_values["m"]
-
-    # Calculate the equivalent coordinates of the (0 degree tilt) calibrated position, at the SEM position stage tilt
-    sem_ref_pos_x = x_0
-    sem_ref_pos_y = y_0 + b_0*math.sin(rx_sem)
-    sem_ref_pos_m = m_0 + b_0*(math.cos(rx_sem) - 1)
-
-    # Calculate the equivalent coordinates of the calibrated position, at the FM position
-    fm_ref_pos_x = x_0 + calibrated_values["dx"]
-    fm_ref_pos_y = y_0 + calibrated_values["dy"] + b_0*math.sin(rx_fm)
-    fm_ref_pos_m = m_0 + b_0*(math.cos(rx_fm) - 1)
-
-    # Use the above reference positions to calculate the equivalent coordinates of the point of interest, at the FM position.
-    # Note that the 180 degree rotation is taken care of by swapping the +/- signs for x and y (wrt the m equation).
-    transformed_pos["x"] = sem_ref_pos_x + (fm_ref_pos_x - pos["x"])
-    transformed_pos["y"] = sem_ref_pos_y + (fm_ref_pos_y - pos["y"])
-    transformed_pos["m"] = sem_ref_pos_m + (pos["m"] - fm_ref_pos_m)
-
-    # Update the angles to the FM position angles
+    transformed_pos["x"] = 2 * pos_cor[0] - pos["x"]
+    transformed_pos["y"] = 2 * pos_cor[1] - pos["y"]
     transformed_pos.update(sem_pos_active)
-
-    # Return transformed_pos (containing the new x, y, m, rx, rm coordinates, as well as the unchanged z coordinate)
     return transformed_pos
-
 
 def _cancelCryoMoveSample(future):
     """

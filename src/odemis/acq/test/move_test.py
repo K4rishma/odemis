@@ -76,7 +76,7 @@ class TestEnzelMove(unittest.TestCase):
 
         # Set custom value that works well within the simulator range
         cls.rx_angle = 0.3
-        cls.rm_angle = 0.1
+        cls.rz_angle = 0.1
 
     def test_sample_switch_procedures(self):
         """
@@ -97,8 +97,8 @@ class TestEnzelMove(unittest.TestCase):
         filter_dict = lambda keys, d: {key: d[key] for key in keys}
         testing.assert_pos_almost_equal(filter_dict({'x', 'y', 'z'}, stage.position.value),
                                      filter_dict({'x', 'y', 'z'}, self.stage_coating), atol=ATOL_LINEAR_POS)
-        testing.assert_pos_almost_equal(filter_dict({'rx', 'rm'}, stage.position.value),
-                                     filter_dict({'rx', 'rm'}, self.stage_coating), atol=ATOL_LINEAR_POS)
+        testing.assert_pos_almost_equal(filter_dict({'rx', 'rz'}, stage.position.value),
+                                     filter_dict({'rx', 'rz'}, self.stage_coating), atol=ATOL_LINEAR_POS)
         # align should be in deactive position
         testing.assert_pos_almost_equal(align.position.value, self.align_deactive, atol=ATOL_LINEAR_POS)
 
@@ -528,49 +528,91 @@ class TestGetDifferenceFunction(unittest.TestCase):
         self.assertAlmostEqual(expected_distance, actual_distance)
 
     def test_only_rotation_axes(self):
-        point1 = {'rx': 0.523599, 'rm': 0} # 30 degree
-        point2 = {'rx': 1.0472, 'rm': 0}    # 60 degree
+        point1 = {'rx': numpy.radians(30), 'rz': 0}  # 30 degree
+        point2 = {'rx': numpy.radians(60), 'rz': 0}  # 60 degree
         # the rotation difference is 30 degree
         expected_rotation = getRotationMatrix("rx", numpy.radians(30))
         exp_rot_error = SCALING_FACTOR*numpy.trace(numpy.eye(3)-expected_rotation)
         act_rot_error = _getDistance(point2, point1)
         self.assertAlmostEqual(exp_rot_error, act_rot_error, places=5)
 
-    def test_only_rotation_axes_but_whtout_difference(self):
-        point1 = {'rx': 0, 'rm': 0.523599} # 30 degree
-        point2 = {'rx': 0, 'rm': 0.523599}  # 30 degree
+        # Same in the other direction
+        act_rot_dist = _getDistance(point2, point1)
+        self.assertAlmostEqual(exp_rot_dist, act_rot_dist)
+
+    def test_rotation_axes_no_difference(self):
+        point1 = {'rx': 0, 'rz': numpy.radians(30)}  # 30 degree
+        point2 = {'rx': 0, 'rz': numpy.radians(30)}  # 30 degree
         # the rotation difference is 0 degree
         exp_rot_error = 0
         act_rot_error = _getDistance(point2, point1)
         self.assertAlmostEqual(exp_rot_error, act_rot_error)
 
-    def test_only_rotation_axes_but_whtout_common_axes(self):
-        point1 = {'rx': 0, 'rm': 0.523599} # 30 degree
-        point2 = {'rm': 1.0472}  # 60 degree
-        # the rotation difference is 30 degree
-        expected_rotation = getRotationMatrix("rm", numpy.radians(30))
-        exp_rot_error = SCALING_FACTOR*numpy.trace(numpy.eye(3)-expected_rotation)
-        act_rot_error = _getDistance(point2, point1)
-        self.assertAlmostEqual(exp_rot_error, act_rot_error, places=5)
+        # Same in the other direction
+        act_rot_error = _getDistance(point1, point2)
+        self.assertAlmostEqual(exp_rot_error, act_rot_error)
+
+    def test_rotation_axes_missing_axis(self):
+        point1 = {'rx': numpy.radians(30), 'rz': numpy.radians(30)}  # 30 degree
+        # No rx => doesn't count it
+        point2 = {'rz': numpy.radians(60)}  # 60 degree
+        exp_rot_dist = ROT_DIST_SCALING_FACTOR * numpy.radians(30)
+        act_rot_dist = _getDistance(point2, point1)
+        self.assertAlmostEqual(exp_rot_dist, act_rot_dist)
+
+        # Same in the other direction
+        act_rot_dist = _getDistance(point2, point1)
+        self.assertAlmostEqual(exp_rot_dist, act_rot_dist)
 
     def test_no_common_axes(self):
-        point1 = {'rx': 0.523599, 'rm': 0.523599}
+        point1 = {'rx': numpy.radians(30), 'rz': numpy.radians(30)}
         point2 = {'x': 0.082, 'y': 0.01}
         self.assertRaises(ValueError, _getDistance, point1, point2)
 
-    def test_both_axes(self):
-        point1 = {'rx': 0, 'rm': 0.523599, 'x': -0.01529, 'y': 0.0506, 'z': 0.01975}
-        point2 = {'rx': 0, 'rm': 1.0472, 'x': -0.01529, 'y': 0.0506, 'z': 0.01975}
-        lin_axes = {'x', 'y', 'z'}  
-        rot_axes = {'rx', 'rm'}
-        pos1 = numpy.array([point1[a] for a in lin_axes])
-        pos2 = numpy.array([point2[a] for a in lin_axes])
-        exp_lin_error = scipy.spatial.distance.euclidean(pos1, pos2)
-        # the rotation difference is 30 degree
-        expected_rotation = getRotationMatrix("rm", numpy.radians(30))
-        exp_rot_error = SCALING_FACTOR*numpy.trace(numpy.eye(3)-expected_rotation)
-        act_error = _getDistance(point1, point2)
-        self.assertAlmostEqual(act_error, exp_rot_error+exp_lin_error, places=6)
+        current_point = {'x': .998, 'y': .999, 'z': .999}  # slightly off the line
+        progress = getMovementProgress(current_point, start_point, end_point)
+        self.assertTrue(util.almost_equal(progress, 0.5, rtol=RTOL_PROGRESS))
+
+        current_point = {'x': 3, 'y': 3, 'z': 3}  # away from the line
+        progress = getMovementProgress(current_point, start_point, end_point)
+        self.assertIsNone(progress)
+
+        current_point = {'x': 1, 'y': 1, 'z': 3}  # away from the line
+        progress = getMovementProgress(current_point, start_point, end_point)
+        self.assertIsNone(progress)
+
+        current_point = {'x': -1, 'y': 0, 'z': 0}  # away from the line
+        progress = getMovementProgress(current_point, start_point, end_point)
+        self.assertIsNone(progress)
+
+    def test_get_progress_lin_rot(self):
+        """
+        Test getMovementProgress return sorted values along a path with linear and
+        rotational axes.
+        """
+        # Test also rotations
+        start_point = {'x': 0, 'rx': 0, 'rz': 0}
+        point_1 = {'x': 0.5, 'rx': 0.1, 'rz': -0.1}
+        point_2 = {'x': 1, 'rx': 0.1, 'rz': -0.1}  # middle
+        point_3 = {'x': 1.5, 'rx': 0.18, 'rz': -0.19}
+        end_point = {'x': 2, 'rx': 0.2, 'rz': -0.2}
+
+        # start_point = 0 < Point 1 < Point 2 < Point 3 < 1 = end_point
+        progress_0 = getMovementProgress(start_point, start_point, end_point)
+        self.assertAlmostEqual(progress_0, 0)
+
+        progress_1 = getMovementProgress(point_1, start_point, end_point)
+
+        # Point 2 should be in the middle
+        progress_2 = getMovementProgress(point_2, start_point, end_point)
+        self.assertTrue(util.almost_equal(progress_2, 0.5, rtol=RTOL_PROGRESS))
+
+        progress_3 = getMovementProgress(point_3, start_point, end_point)
+
+        progress_end = getMovementProgress(end_point, start_point, end_point)
+        self.assertAlmostEqual(progress_end, 1)
+
+        assert progress_0 < progress_1 < progress_2 < progress_3 < progress_end
 
 
 if __name__ == "__main__":
