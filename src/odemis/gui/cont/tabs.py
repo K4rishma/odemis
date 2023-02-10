@@ -66,7 +66,7 @@ from odemis.acq.align.autofocus import GetSpectrometerFocusingDetectors
 from odemis.acq.align.autofocus import Sparc2AutoFocus, Sparc2ManualFocus
 from odemis.acq.align.fastem import Calibrations
 from odemis.acq.move import GRID_1, GRID_2, LOADING, COATING, MILLING, UNKNOWN, ALIGNMENT, LOADING_PATH, getCurrentGridLabel, \
-    FM_IMAGING, SEM_IMAGING, getTargetPosition, POSITION_NAMES, THREE_BEAMS, \
+    IMAGING, FM_IMAGING, SEM_IMAGING, getTargetPosition, POSITION_NAMES, THREE_BEAMS, \
     get3beamsSafePos, ATOL_LINEAR_POS, SAFETY_MARGIN_5DOF, cryoSwitchSamplePosition, getMovementProgress, getCurrentPositionLabel
 from odemis.acq.stream import OpticalStream, SpectrumStream, TemporalSpectrumStream, \
     CLStream, EMStream, LiveStream, FIBStream, \
@@ -2554,9 +2554,11 @@ class CryoChamberTab(Tab):
                                              THREE_BEAMS: get3beamsSafePos(stage_metadata[model.MD_FAV_POS_ACTIVE], SAFETY_MARGIN_5DOF)
                                              }
 
-            panel.btn_switch_advanced.Show()
-            panel.pnl_advanced_align.Show()
-
+            # hide meteor buttons
+            panel.btn_switch_sem_imaging.Hide()
+            panel.btn_switch_fm_imaging.Hide()
+            panel.btn_switch_grid1.Hide()
+            panel.btn_switch_grid2.Hide()
             # Vigilant attribute connectors for the align slider and show advanced button
             self._slider_aligner_va_connector = VigilantAttributeConnector(tab_data.stage_align_slider_va,
                                                                         self.panel.stage_align_slider_aligner,
@@ -2590,8 +2592,8 @@ class CryoChamberTab(Tab):
                 raise ValueError("The stage misses the 'SEM_IMAGING_RANGE' metadata.")
             if not model.MD_FM_IMAGING_RANGE in stage_metadata:
                 raise ValueError("The stage misses the 'FM_IMAGING_RANGE' metadata.")
-            # if not model.MD_POS_COR in stage_metadata:
-            #     raise ValueError("The stage misses the 'POS_COR' metadata.")
+            if not model.MD_POS_COR in stage_metadata:
+                raise ValueError("The stage misses the 'POS_COR' metadata.")
 
             # Fail early when required axes are not found on the focuser positions metadata
             focuser = self.tab_data_model.main.focus
@@ -2606,20 +2608,37 @@ class CryoChamberTab(Tab):
                                   GRID_2: self.panel.btn_switch_grid2, GRID_1: self.panel.btn_switch_grid1}
             self._grid_btns = (self.panel.btn_switch_grid1, self.panel.btn_switch_grid2)
 
-        elif self._role == 'mimas':
+            # hide some of enzel widgets
+            panel.btn_switch_loading.Hide()
+            panel.btn_switch_imaging.Hide()
+            panel.btn_switch_coating.Hide()
+            panel.btn_switch_align.Hide()
+            panel.btn_switch_zero_tilt_imaging.Hide()
+            panel.btn_switch_advanced.Hide()
+            panel.pnl_advanced_align.Hide()
+
+        elif self._role == "mimas":
             self._stage = self.tab_data_model.main.stage
-            stage_metadata = self._stage.getMetadata()
 
             self.position_btns = {
-                LOADING: self.panel.btn_switch_loading_chamber_tab,
-                COATING: self.panel.btn_switch_coating_chamber_tab,
-                FM_IMAGING: self.panel.btn_switch_optical_chamber_tab,
-                MILLING: self.panel.btn_switch_milling_chamber_tab
+                LOADING: self.panel.btn_switch_loading,
+                FM_IMAGING: self.panel.btn_switch_fm_imaging,
+                SEM_IMAGING: self.panel.btn_switch_sem_imaging,
+                COATING: self.panel.btn_switch_coating,
             }
 
             self._grid_btns = ()
 
             # TODO: add Tilt angle control, like on the ENZEL, but outside the advanced panel
+            # Hide unused buttons (from ENZEL and METEOR)
+            panel.btn_switch_imaging.Hide()
+            panel.btn_switch_align.Hide()
+            panel.btn_switch_zero_tilt_imaging.Hide()
+            panel.btn_switch_grid1.Hide()
+            panel.btn_switch_grid2.Hide()
+
+            panel.btn_switch_advanced.Hide()
+            panel.pnl_advanced_align.Hide()
 
         # start and end position are used for the gauge progress bar
         self._start_pos = self._stage.position.value
@@ -2627,7 +2646,6 @@ class CryoChamberTab(Tab):
 
         # Event binding for position control
         for btn in self.position_btns.values():
-            btn.Show()
             btn.Bind(wx.EVT_BUTTON, self._on_switch_btn)
 
         panel.btn_cancel.Bind(wx.EVT_BUTTON, self._on_cancel)
@@ -2898,8 +2916,6 @@ class CryoChamberTab(Tab):
             self._enable_advanced_controls(self._current_position == SEM_IMAGING)
         elif self._role == 'meteor':
             self._control_warning_msg()
-        elif self._role == 'mimas':
-            pass
 
     def _enable_position_controls(self, current_position):
         """
@@ -2959,19 +2975,6 @@ class CryoChamberTab(Tab):
             current_grid_label = getCurrentGridLabel(self._stage.position.value, self._stage)
             btn = self.position_btns.get(current_grid_label)
             self._toggle_grid_buttons(btn)
-
-        elif self._role == 'mimas':
-            # enabling/disabling mimas buttons
-            for movement, button in self.position_btns.items():
-                if current_position == UNKNOWN:
-                    # If at unknown position, only allow going to LOADING position
-                    button.Enable(movement == LOADING)
-                else:
-                    button.Enable(True)
-
-            # turn on (green) the current position button green
-            btn = self.position_btns.get(current_position)
-            self._toggle_switch_buttons(btn)
 
     def _enable_advanced_controls(self, enable=True):
         """
@@ -3090,7 +3093,7 @@ class CryoChamberTab(Tab):
         self._update_movement_controls()
 
         # After the movement is done, set start, end and target position to None
-        # That way any stage moves from outside the chamber tab are not considered
+        # That way any stage moves from outside the the chamber tab are not considered
         self._target_position = None
         self._start_pos = None
         self._end_pos = None
@@ -4760,7 +4763,7 @@ class EnzelAlignTab(Tab):
             guimod.SEM_ALIGN: panel.btn_align_sem,
             guimod.FLM_ALIGN: panel.btn_align_flm,
         }
-
+        
         # Bind the align mode buttons
         for btn in self._align_modes.values():
             btn.Bind(wx.EVT_BUTTON, self._set_align_mode)
@@ -4839,6 +4842,7 @@ class EnzelAlignTab(Tab):
                 return
 
         future_stage_move.add_done_callback(move_aligner)
+
 
     def _set_z_alignment_mode(self):
         """
@@ -5238,12 +5242,12 @@ class MimasAlignTab(Tab):
         #  and update the engage position to the default position.
         align_md = self._aligner.getMetadata()
         align_pos = align_md[model.MD_FAV_POS_ALIGN]
-        align_pos_deactive = align_md[model.MD_FAV_POS_DEACTIVE]
 
         if current_pos_label == FM_IMAGING:
             f_aligner_mv = self._aligner.moveAbs(align_pos)
             self._aligner.updateMetadata({model.MD_FAV_POS_ACTIVE: align_pos})
         elif current_pos_label == MILLING:
+            align_pos_deactive = align_md[model.MD_FAV_POS_DEACTIVE]
             f_aligner_mv = self._aligner.moveAbs(align_pos_deactive)
             self._aligner.updateMetadata({model.MD_FAV_POS_ACTIVE: align_pos})
         else:
@@ -5266,13 +5270,8 @@ class MimasAlignTab(Tab):
         # Unpress the optical button and set the icon color of the pressed button to orange
         self.panel.btn_position_opt.SetValue(0)
 
-        # get the metadata to retract the objective
-        align_md = self._aligner.getMetadata()
-        deactive_pos = align_md[model.MD_FAV_POS_DEACTIVE]
-
         # create a future and update the appropriate controls after it is called
-        self._move_future = self._aligner.moveAbs(deactive_pos)
-
+        self._move_future = cryoSwitchSamplePosition(MILLING)
         self._move_future.add_done_callback(self._on_pos_move_done)
 
     def _set_flm_alignment_mode(self, evt):
@@ -5284,14 +5283,8 @@ class MimasAlignTab(Tab):
         # Unpress the FIB button and set the icon color of the pressed button to orange
         self.panel.btn_position_fib.SetValue(0)
 
-        # TODO: use the cryoSwitchSamplePosition(), once it supports MIMAS
-
-        # get the metadata to retract the objective
-        align_md = self._aligner.getMetadata()
-        active_pos = align_md[model.MD_FAV_POS_ACTIVE]
-
         # create a future and update the appropriate controls after it is called
-        self._move_future = self._aligner.moveAbs(active_pos)
+        self._move_future = cryoSwitchSamplePosition(FM_IMAGING)
         self._move_future.add_done_callback(self._on_pos_move_done)
 
     @call_in_wx_main
@@ -5358,7 +5351,7 @@ class MimasAlignTab(Tab):
 
         for btn in self.position_btns.values():
             # Disable if in some odd position (and enable back otherwise)
-            btn.Enable(current_pos_label != UNKNOWN)
+            btn.Enable(current_pos_label in (FM_IMAGING, MILLING, IMAGING))
 
             if btn == currently_pressed:
                 btn.SetValue(2)  # Completed
