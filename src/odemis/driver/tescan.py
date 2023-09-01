@@ -1109,32 +1109,51 @@ class Stage(model.Actuator):
         self._position["y"] = -y * 1e-3
         self._position["z"] = -z * 1e-3
 
+        if "rz" in self.axes:
+            self._position["rz"] = math.radians(rz)
+        if "rx" in self.axes:
+            self._position["rx"] = math.radians(rx)
+
         # it's read-only, so we change it via _value
         pos = self._applyInversion(self._position)
         self.position._set_value(pos, force_write=True)
         logging.debug("Updated stage position to %s", pos)
 
-    def _doMoveAbs(self, pos):
+    def _doMoveAbs(self, pos: dict):
         """
-        move to the position
+        move to the requested (absolute) position
+        :param pos (dict[str, float]): positions of linear axes in m or rotational axes in radians
         """
         # TODO: support cancelling (= call StgStop) will be addressed in separate PR
         with self.parent._acq_progress_lock:
             logging.debug("Requesting stage move to %s", pos)
 
-            # If not all axes requested, fill up the rest with the current position
-            if pos.keys() < {"x", "y", "z"}:
-                self._updatePosition()
-                current_pos = self._position.copy()
-                current_pos.update(pos)
-                pos = current_pos
+            x, y, z, rz, rx = self.parent._device.StgGetPosition()
+            current_pos = {"x": x, "y": y, "z": z, "rz": rz, "rx": rx}
 
-            # Position from m to mm and inverted
-            self.parent._device.StgMoveTo(-pos["x"] * 1e3,
-                                          -pos["y"] * 1e3,
-                                          -pos["z"] * 1e3)
+            req_pos = {}
 
-            # TODO: does it need a bit of time before checking it's busy?
+            for axis in {"x", "y", "z", "rz", "rx"}:
+                if axis in pos:
+                    # convert from m to mm and invert for the linear axes
+                    if axis in {"x", "y", "z"}:
+                        req_pos[axis] = -pos[axis] * 1e3
+                    # convert from radians to degrees for the rotational axes
+                    elif axis in {"rz", "rx"}:
+                        req_pos[axis] = math.degrees(pos[axis])
+
+            current_pos.update(req_pos)
+
+            # always issue a move command containing values for all 5 axes so
+            # there is no separate code needed for backward compatibility
+            self.parent._device.StgMoveTo(current_pos["x"],
+                                          current_pos["y"],
+                                          current_pos["z"],
+                                          current_pos["rz"],
+                                          current_pos["rx"],
+                                          )
+
+            # a very small delay before checking if the stage is busy
             time.sleep(0.1)
 
             # Wait until move is completed
@@ -1144,12 +1163,22 @@ class Stage(model.Actuator):
             logging.debug("Stage move to %s completed", pos)
             self._updatePosition()
 
-    def _doMoveRel(self, shift):
-        # Compute the position in absolute coordinates
+    def _doMoveRel(self, shift: dict):
+        """
+        Request the position in absolute coordinates and create new positions after applying shift values
+        :param shift (dict[str, float]): shift of linear axes in m or rotational axes in radians
+        """
         self._updatePosition()
         pos = self._position.copy()
+
+        # add the requested change to the current position
         for axis, change in shift.items():
             pos[axis] += change
+            if axis in ("rx", "rz"):
+                rng = self.axes[axis].range
+                if abs(rng[1] - rng[0]) >= 2 * math.pi:
+                    # for full rotational axes this check maps values outside the range to between 0 and 2pi
+                    pos[axis] = (pos[axis] - rng[0]) % (2 * math.pi) + rng[0]
 
         self._checkMoveAbs(self._applyInversion(pos))
         self._doMoveAbs(pos)

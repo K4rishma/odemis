@@ -304,7 +304,7 @@ class TestMeteorMove(unittest.TestCase):
     """
     @classmethod
     def setUpClass(cls):
-        testing.start_backend(METEOR_CONFIG)
+        # testing.start_backend(METEOR_CONFIG)
         cls.microscope = model.getMicroscope()
         cls.posture_manager = MicroscopePostureManager(microscope=cls.microscope)
 

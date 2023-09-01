@@ -605,7 +605,7 @@ class ConvertStage(model.Actuator):
             raise ValueError("Incorrect number of axes.")
 
     def __init__(self, name, role, dependencies, axes,
-                 rotation=0, scale=None, translation=None, **kwargs):
+                 rotation=0, gamma=None, scale=None, translation=None, **kwargs):
         """
         dependencies (dict str -> actuator): name to objective lens actuator
         axes (list of 2 strings): names of the axes for x and y
@@ -634,6 +634,7 @@ class ConvertStage(model.Actuator):
         self._metadata[model.MD_POS_COR] = translation
         self._metadata[model.MD_ROTATION_COR] = rotation
         self._metadata[model.MD_PIXEL_SIZE_COR] = scale
+        self._gamma = gamma
         self._updateConversion()
 
         # RO, as to modify it the client must use .moveRel() or .moveAbs()
@@ -662,9 +663,10 @@ class ConvertStage(model.Actuator):
 
     def _get_rot_matrix(self, invert=False):
         rotation = self._metadata[model.MD_ROTATION_COR]
+        gamma = self._gamma
         if invert:
             rotation *= -1
-        return RigidTransform(rotation=rotation).matrix
+        return RigidTransform(rotation=rotation, gamma=gamma).matrix
 
     def _updateConversion(self):
         translation = self._metadata[model.MD_POS_COR]

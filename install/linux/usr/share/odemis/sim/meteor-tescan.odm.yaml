@@ -1,0 +1,230 @@
+# For now, this is esssentially just a FM microscope, as the FIB part is handled
+# separately by the SEM
+
+METEOR: {
+    class: Microscope,
+    role: meteor,
+    children: [
+        "Stage",
+        "Meteor Stage",
+        "Optical Objective",
+        "Optical Focus",
+        "Light Source",
+        "Filter Wheel",
+        "Camera",
+        "EBeam",
+    ],
+}
+
+"SEM": {
+    class: tescan.SEM,
+    role: null,
+    init: { host: "192.168.56.11" },
+    # more detectors can be added, if necessary
+    children: {
+        scanner: "EBeam",
+#        focus: "EBeam Focus",
+#        detector: "EBeam Detector",
+        stage: "Stage",
+    }
+}
+
+"EBeam": {
+    # Internal child of Tescan, so no class
+    role: null,
+    init: {fov_range: [196.e-9, 25586.e-6]},
+}
+
+# For e-beam image support
+#"EBeam Detector": {
+#    role: se-detector,
+#}
+
+#"EBeam Focus": {
+#    role: ebeam-focus,
+#}
+
+"Stage": {
+        role: stage-bare,
+    init: {
+        inverted: {"x", "y", "z"},
+    },
+    metadata: {
+        # Loading position:
+        FAV_POS_DEACTIVE: {'rx': 0.0, 'rz': 1.0471975511965976, 'x': -30.e-3, 'y':  -40.e-03, 'z':  45.e-3}, # T 0°, R 60°
+        # XYZ ranges for SEM & METEOR
+        SEM_IMAGING_RANGE: {"x": [-13.e-3, 7.e-3], "y": [-10.e-3, 10.e-3], "z": [28.e-3, 32.e-3]},
+        FM_IMAGING_RANGE: {"x": [-44.e-3, -24.e-3], "y": [-23.e-3, -3.e-3], "z": [28.e-3, 32.e-3]},
+        # Grid centers in SEM range
+        SAMPLE_CENTERS: {"GRID 1": {'x': -4.73816e-3, 'y': 0.20226e-3, 'z': 30.39e-3}, "GRID 2": {'x': -0.7382e-3, 'y': 0.2023e-3, 'z': 30.39e-3}},
+        # Calibrated values used for the SEM/FM switching behaviour
+        CALIB: { "x_0": 1.4498e-3  , "y_0": 0.e-3 , "z_ct": 6.e-3 , "dx": -40.1e-3  , "dy": 0, "version": "tescan_1" },
+        # Active tilting (rx) & rotation(rz) angles positions when switching between SEM & FM.
+        # Note: these values are calibrated at installation time.
+        # Note: the values are in radian.
+        FAV_FM_POS_ACTIVE: {"rx": 0.261799, "rz": 3.6651914291880923}, # 15° and 210°
+        FAV_SEM_POS_ACTIVE: {"rx": 0.261799, "rz": 0.523598775} # 15° and 30, difference in rz between SEM and FM should be 180°
+    },
+}
+
+"Linked YZ": {
+    class: actuator.ConvertStage,
+    role: null,
+    dependencies: {
+        "under": "Stage"
+    },
+    init: {
+        axes: [ "y", "z" ], # name of the axes in the dependency, mapped to x,y (if identity transformation)
+        rotation: 0.698131700, # rad , 40°
+        gamma: 0.261799, # rad, 15° ?? TODO should be same as rx_sem
+    },
+}
+
+"Meteor Stage": {
+    class: actuator.MultiplexActuator,
+    role: stage,
+    dependencies: { "x": "Stage", "y": "Linked YZ", "z": "Linked YZ", },
+    init: {
+        axes_map: { "x": "x", "y": "x", "z": "y",},
+    },
+    affects: ["Camera", "EBeam"],
+    metadata: {
+        POS_ACTIVE_RANGE: {"x": [-44.e-3, -24.e-3], "y": [-23.e-3, -3.e-3]} # same as FM imaging range
+    },
+}
+
+"Light Source": {
+    class: omicronxx.HubxX,
+    role: light,
+    init: {
+        port: "/dev/fakehub", # Simulator
+        # port: "/dev/ttyFTDI*",
+    },
+    affects: ["Camera"],
+}
+
+"Optical Objective": {
+    class: static.OpticalLens,
+    role: lens,
+    init: {
+        # TODO check magnification
+        mag: 84.0, # ratio, (actually of the complete light path)
+        na: 0.5, # ratio, numerical aperture
+        ri: 1.0, # ratio, refractive index
+    },
+    affects: ["Camera"]
+}
+
+# Zyla
+"Camera": {
+    class: andorcam2.AndorCam2,
+    role: ccd,
+    init: {
+        # device: 0,  # if a real camera is plugged in, it's usually 0
+        device: "fake",
+        # TODO: adjust the axes so that they match the SEM orientation (with scan rotation = 0)
+        transp: [2, 1], # To swap/invert axes
+        # TODO: adjust the cropping (use multiple of 4, for a better handling of the binning)
+        # max_res: [1040, 828], # Crop the image as the optical FoV is smaller than the whole CMOS area
+    },
+    properties: {
+        # To change some default settings
+#        targetTemperature: 0,
+    },
+    metadata: {
+        # The camera is not exactly parallel to the stage axes
+        ROTATION: 0, # [rad] (=0°)
+    },
+}
+
+# Controller for the filter-wheel
+# TMCM-6110: DIP must be configured with address 7 (= 1110000)
+# TMCM-1211: Must be pre-initiliazed with address 17
+"Optical Actuators": {
+    class: tmcm.TMCLController,
+    role: null,
+    init: {
+        # port: "/dev/ttyTMCM*",
+        #address: 7,  # TMCM-6110
+        #address: 17,  # TMCM-1211
+        port: "/dev/fake", # Simulator
+        address: null, # Simulator
+        # param_file: "/usr/share/odemis/meteor-tmcm1211-filterwheel.tmcm.tsv",
+        axes: ["fw"],
+        ustepsize: [1.227184e-6], # [rad/µstep]
+        rng: [[-14, 7]], # rad, more than 0->2 Pi, in order to allow one extra rotation in both direction, when quickly switching
+        unit: ["rad"],
+        refproc: "Standard",
+        refswitch: {"fw": 0}, #digital output used to switch on/off sensor
+        #inverted: ["fw"], # for the filter wheel, the direction doesn't matter, as long as the positions are correct
+    },
+}
+
+"AntiBacklash for Filter Wheel": {
+    class: actuator.AntiBacklashActuator,
+    role: null,
+    init: {
+        backlash: {
+            # Force every move to always finish in the same direction
+            "fw": 50.e-3,  # rad
+        },
+    },
+    children: {"slave": "Optical Actuators"},
+}
+
+"Filter Wheel": {
+    class: actuator.FixedPositionsActuator,
+    role: filter,
+    dependencies: {"band": "AntiBacklash for Filter Wheel"},
+    init: {
+        axis_name: "fw",
+        # This filter-wheel is made so that the light goes through two "holes":
+        # the filter, and the opposite hole (left empty). So although it has 8
+        # holes, it only supports 4 filters (from 0° to 135°), and there is no
+        # "fast-path" between the last filter and the first one.
+        positions: {
+             # pos (rad) -> m,m
+             0.08: [414.e-9, 450.e-9], # FF01-432/36
+             0.865398: [500.e-9, 530.e-9], # FF01-515/30
+             1.650796: [579.5e-9, 610.5e-9], # FF01-595/31
+             2.4361944: [663.e-9, 733.e-9], # FF02-698/70
+        },
+        cycle: 6.283185, # position of ref switch (0) after a full turn
+    },
+    affects: ["Camera"],
+}
+
+# CLS3252dsc-1
+"Optical Focus": {
+    class: smaract.MCS2,
+    role: focus,
+    init: {
+        # locator: "network:sn:MCS2-00006895",
+        locator: "fake",  # For simulator
+        # param_file: "/usr/share/odemis/meteor-optical-focus.mcs2.tsv",
+        ref_on_init: True,
+        # TODO: check speed/accel
+        speed: 0.002,  # m/s
+        accel: 0.002,  # m/s²
+        #hold_time: 5 # s, default = infinite
+        # TODO: check the ranges
+        axes: {
+            'z': {
+                # 0 is safely parked (FAV_POS_DEACTIVE)
+                # 17mm is typically in focus (FAV_POS_ACTIVE)
+                range: [-15.e-3, 15.e-3],
+                unit: 'm',
+                channel: 0,
+            },
+        },
+    },
+
+    metadata: {
+        # TODO: calibrate the value
+        # Loading position to retract lense
+        FAV_POS_DEACTIVE: {'z': -10.e-3},
+        # Initial active position (will be updated with the current focus value each system run)
+        FAV_POS_ACTIVE: {'z': 0.e-3}
+    },
+    affects: ["Camera"],
+}
