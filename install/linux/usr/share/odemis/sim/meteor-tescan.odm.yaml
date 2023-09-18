@@ -76,7 +76,6 @@ METEOR: {
     init: {
         axes: [ "y", "z" ], # name of the axes in the dependency, mapped to x,y (if identity transformation)
         rotation: 0.698131700, # rad , 40°
-        gamma: 0.261799, # rad, 15° ?? TODO should be same as rx_sem
     },
 }
 

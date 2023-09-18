@@ -406,7 +406,7 @@ def _assert_is_rotation_matrix(matrix: numpy.ndarray) -> None:
         raise LinAlgError("Matrix is not a proper rotation matrix")
 
 
-def _rotation_matrix_from_angle(angle: float, gamma: float) -> numpy.ndarray:
+def _rotation_matrix_from_angle(angle: float, tilt: float) -> numpy.ndarray:
     """
     Returns the 2x2 rotation matrix for a given angle.
 
@@ -414,8 +414,8 @@ def _rotation_matrix_from_angle(angle: float, gamma: float) -> numpy.ndarray:
     ----------
     angle : float
         Rotation angle in radians.
-    gamma: float #TODO
-
+    tilt: float
+        Tilt angle in radians.
     Returns
     -------
     matrix : 2x2 array
@@ -428,16 +428,15 @@ def _rotation_matrix_from_angle(angle: float, gamma: float) -> numpy.ndarray:
            [ 1.,  0.]])
 
     """
-    if gamma:
-        a = 1/(numpy.cos(angle) + numpy.sin(angle)*numpy.tan(angle+gamma)) # TODO maybe a negative
-        b = 1/(numpy.sin(angle+gamma) + 1/(numpy.tan(angle))*numpy.cos(angle+gamma)) # TODO get the angle from rx_fm
+    if tilt:
+        a = 1/(numpy.cos(angle) + numpy.sin(angle)*numpy.tan(angle+tilt))
+        b = 1/(numpy.sin(angle+tilt) + 1/(numpy.tan(angle))*numpy.cos(angle+tilt))
         matrix = numpy.array([(a, 0), (b, 0)])
     else:
         ct = numpy.cos(angle)
         st = numpy.sin(angle)
         matrix = numpy.array([(ct, -st), (st, ct)])
     return matrix
-
 
 
 def _rotation_matrix_to_angle(matrix: numpy.ndarray) -> float:
@@ -512,7 +511,7 @@ def _ldlt_decomposition(a: numpy.ndarray) -> Tuple[numpy.ndarray, numpy.ndarray]
 
 
 def _transformation_matrix_from_implicit(
-    scale: float, rotation: float, squeeze: float, shear: float, gamma: float
+    scale: float, rotation: float, squeeze: float, shear: float, tilt: float
 ) -> numpy.ndarray:
     """
     Return the transformation matrix given the implicit parameters.
@@ -527,7 +526,8 @@ def _transformation_matrix_from_implicit(
         Anisotropic scale factor.
     shear : float
         Shear factor.
-    gamma # TODO
+    tilt : float
+        Tilt angle in counter-clockwise direction as radians.
 
     Returns
     -------
@@ -539,7 +539,7 @@ def _transformation_matrix_from_implicit(
         raise ValueError("The scale factor should be positive.")
     if squeeze <= 0:
         raise ValueError("The squeeze factor should be positive.")
-    R = _rotation_matrix_from_angle(rotation, gamma)
+    R = _rotation_matrix_from_angle(rotation, tilt)
     L = numpy.array([(1, 0), (shear, 1)], dtype=float)
     D = numpy.array([squeeze, 1.0 / squeeze], dtype=float)
     return scale * R @ (L * D) @ L.T  # type: ignore
@@ -785,7 +785,7 @@ class GeometricTransform(metaclass=ABCMeta):
     _matrix: Optional[numpy.ndarray] = None
     scale = ImplicitParameter(1, positive=True)
     rotation = ImplicitParameter(0)
-    gamma = ImplicitParameter(0)
+    tilt = ImplicitParameter(0)
     squeeze = ImplicitParameter(1, positive=True)
     shear = ImplicitParameter(0)
 
@@ -869,7 +869,7 @@ class GeometricTransform(metaclass=ABCMeta):
         """The 2x2 transformation matrix. Does not include translation."""
         if self._matrix is None:
             self._matrix = _transformation_matrix_from_implicit(
-                self.scale, self.rotation, self.squeeze, self.shear, self.gamma
+                self.scale, self.rotation, self.squeeze, self.shear, self.tilt
             )
         return self._matrix
 
@@ -1291,6 +1291,8 @@ class RigidTransform(SimilarityTransform):
         Squeeze factor. Always equal to 1.
     shear : float
         Shear factor. Always equal to 0.
+    tilt : float
+        Tilt angle in radians.
 
     """
 
@@ -1302,9 +1304,9 @@ class RigidTransform(SimilarityTransform):
         translation: Optional[numpy.ndarray] = None,
         *,
         rotation: Optional[float] = None,
-        gamma: Optional[float] = None,
+        tilt: Optional[float] = None,
     ) -> None:
-        GeometricTransform.__init__(self, matrix, translation, rotation=rotation, gamma=gamma)
+        GeometricTransform.__init__(self, matrix, translation, rotation=rotation, tilt=tilt)
 
     @staticmethod
     def _estimate_matrix(x: numpy.ndarray, y: numpy.ndarray) -> numpy.ndarray:

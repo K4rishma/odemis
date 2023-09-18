@@ -605,7 +605,7 @@ class ConvertStage(model.Actuator):
             raise ValueError("Incorrect number of axes.")
 
     def __init__(self, name, role, dependencies, axes,
-                 rotation=0, gamma=None, scale=None, translation=None, **kwargs):
+                 rotation=0, scale=None, translation=None, **kwargs):
         """
         dependencies (dict str -> actuator): name to objective lens actuator
         axes (list of 2 strings): names of the axes for x and y
@@ -631,10 +631,20 @@ class ConvertStage(model.Actuator):
                     "y": self._dependency.axes[axes[1]]}
         model.Actuator.__init__(self, name, role, dependencies=dependencies, axes=axes_def, **kwargs)
 
+        # For Tescan stage, Z and Y axes are not perpendicular
+        # The Linked Y_Z actuator depends on the tilt angle around X axis for the conversion
+        stage = model.getComponent(role='stage-bare')
+        stage_md = stage.getMetadata()
+        md_calib = stage_md.get(model.MD_CALIB, None)
+        # Check the version in MD_CALIB, defaults to tfs_1
+        stage_version = md_calib.get("version", "tfs_1") if md_calib else "tfs_1"
+        self._tilt = None
+        if stage_version == "tescan_1":
+            self._tilt = stage_md[model.MD_FAV_FM_POS_ACTIVE]["rx"]
+
         self._metadata[model.MD_POS_COR] = translation
         self._metadata[model.MD_ROTATION_COR] = rotation
         self._metadata[model.MD_PIXEL_SIZE_COR] = scale
-        self._gamma = gamma
         self._updateConversion()
 
         # RO, as to modify it the client must use .moveRel() or .moveAbs()
@@ -663,10 +673,9 @@ class ConvertStage(model.Actuator):
 
     def _get_rot_matrix(self, invert=False):
         rotation = self._metadata[model.MD_ROTATION_COR]
-        gamma = self._gamma
         if invert:
             rotation *= -1
-        return RigidTransform(rotation=rotation, gamma=gamma).matrix
+        return RigidTransform(rotation=rotation, tilt=self._tilt).matrix
 
     def _updateConversion(self):
         translation = self._metadata[model.MD_POS_COR]
