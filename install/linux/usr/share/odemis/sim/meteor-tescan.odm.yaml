@@ -27,7 +27,7 @@ METEOR: {
 "SEM": {
     class: tescan.SEM,
     role: null,
-    init: { host: "192.168.50.1" }, # simulation "192.168.56.11"
+    init: { host: "192.168.56.11" }, # simulation "192.168.56.11" hardware "192.168.50.1"
     # more detectors can be added, if necessary
     children: {
         scanner: "EBeam",
@@ -142,7 +142,7 @@ METEOR: {
         transp: [2, 1], # To swap/invert axes
         # TODO: adjust the cropping (use multiple of 4, for a better handling of the binning)
         # Calibrate per system to obtain right balance between uniform image and large field of view.
-        max_res: [2048, 2048], # Crop the image as the optical FoV is smaller than the whole CMOS area
+        # max_res: [2048, 2048], # Crop the image as the optical FoV is smaller than the whole CMOS area
     },
     properties: {
         # To change some default settings
