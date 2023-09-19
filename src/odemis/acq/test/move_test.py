@@ -522,7 +522,7 @@ class TestMeteorMove(unittest.TestCase):
         self.assertEqual(SEM_IMAGING, current_imaging_mode)
 
     def test_unknown_label_at_initialization(self):
-        arbitrary_position = {"x": 0.0, "y": 0.0, "z":-3.0e-3}
+        arbitrary_position = {'rx': 0.0, 'rz': -1.0471975511965976, 'x': 0, 'y': 0, 'z':  40.e-3}
         self.stage.moveAbs(arbitrary_position).result()
         current_imaging_mode = self.posture_manager.getCurrentPostureLabel()
         self.assertEqual(UNKNOWN, current_imaging_mode)

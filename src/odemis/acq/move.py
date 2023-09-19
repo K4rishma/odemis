@@ -1108,11 +1108,12 @@ class MeteorTescan1PostureManager(MeteorPostureManager):
                     sub_moves.append((stage, filter_dict({'rx'}, target_pos)))
                     sub_moves.append((stage, filter_dict({'z'}, target_pos)))
 
-
             if target in (GRID_1, GRID_2):
                 # The current mode doesn't change.
-                sub_moves.append((stage, filter_dict({'x', 'y', 'z'}, target_pos)))
-                sub_moves.append((stage, filter_dict({'rx', 'rz'}, target_pos)))
+                sub_moves.append((stage, filter_dict({'x'}, target_pos)))
+                sub_moves.append((stage, filter_dict({'y', 'rz'}, target_pos)))
+                sub_moves.append((stage, filter_dict({'rx'}, target_pos)))
+                sub_moves.append((stage, filter_dict({'z'}, target_pos)))
 
             elif target in (LOADING, SEM_IMAGING, FM_IMAGING):
                 # Park the focuser for safety
@@ -1133,30 +1134,20 @@ class MeteorTescan1PostureManager(MeteorPostureManager):
                     sub_moves.append((stage, filter_dict({'z'}, target_pos)))
                 if target == FM_IMAGING:
 
-                    # if current_label == LOADING:
-                    #     # In practice, the user will not go directly from LOADING to FM_IMAGING
-                    #     # but will go through SEM_IMAGING first. But just in case, we handle the case
-                    #     # where the current position is LOADING and the target is FM_IMAGING, do the following:
-                    #     # First switch from Loading to SEM_IMAGING
-                    #     sem_int_posit = self.getTargetPosition(SEM_IMAGING)
-                    #     sub_moves.append((stage, filter_dict({'rx'}, sem_int_posit)))
-                    #     sub_moves.append((stage, filter_dict({'rz', 'x', 'y'}, sem_int_posit)))
-                    #     sub_moves.append((stage, filter_dict({'z'}, sem_int_posit)))
-                    #     # Then switch the stage from SEM_IMAGING to FM_IMAGING
-                    #     sub_moves.append((stage, filter_dict({'z'}, target_pos)))
-                    #     sub_moves.append((stage, filter_dict({'y', 'x', 'rz'}, target_pos)))
-                    #     sub_moves.append((stage, filter_dict({'rx'}, target_pos)))
-                    #
-                    # if current_label == SEM_IMAGING:
-                    #     # when switching from SEM to FM
-                    #     # move in the following order :
-                    #     sub_moves.append((stage, filter_dict({'z'}, target_pos)))
-                    #     sub_moves.append((stage, filter_dict({'y', 'x', 'rz'}, target_pos)))
-                    #     sub_moves.append((stage, filter_dict({'rx'}, target_pos)))
-                    sub_moves.append((stage, filter_dict({'z'}, target_pos)))
-                    sub_moves.append((stage, filter_dict({'rx'}, target_pos)))
-                    sub_moves.append((stage, filter_dict({'rz', 'y'}, target_pos)))
-                    sub_moves.append((stage, filter_dict({'x'}, target_pos)))
+                    if current_label == LOADING:
+                        # In practice, the user will not go directly from LOADING to FM_IMAGING
+                        sub_moves.append((stage, filter_dict({'x'}, target_pos)))
+                        sub_moves.append((stage, filter_dict({'y', 'rz'}, target_pos)))
+                        sub_moves.append((stage, filter_dict({'rx'}, target_pos)))
+                        sub_moves.append((stage, filter_dict({'z'}, target_pos)))
+
+                    if current_label == SEM_IMAGING:
+                        # when switching from SEM to FM
+                        # move in the following order :
+                        sub_moves.append((stage, filter_dict({'z'}, target_pos)))
+                        sub_moves.append((stage, filter_dict({'rx'}, target_pos)))
+                        sub_moves.append((stage, filter_dict({'rz', 'y'}, target_pos)))
+                        sub_moves.append((stage, filter_dict({'x'}, target_pos)))
                     # Engage the focuser
                     sub_moves.append((focus, focus_active))
             else:
