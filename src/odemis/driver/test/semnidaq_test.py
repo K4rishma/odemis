@@ -683,7 +683,6 @@ class TestAnalogSEM(unittest.TestCase):
             self.assertIn(model.MD_DWELL_TIME, da.metadata)
             self.assertAlmostEqual(da.metadata[model.MD_PIXEL_SIZE], exp_pxs)
 
-
     def test_acquisition_counter(self):
         self.scanner.dwellTime.value = 10e-06  # s
         self.scanner.scale.value = 8, 8
