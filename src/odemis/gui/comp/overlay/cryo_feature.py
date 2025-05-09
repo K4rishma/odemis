@@ -350,7 +350,7 @@ class CryoCorrelationPointsOverlay(WorldOverlay, DragMixin):
         :param v_pos: (int, int) the coordinates in the view
         """
         p_pos = self.cnvs.view_to_phys(v_pos, self.cnvs.get_half_buffer_size())
-        self._selected_target.pos.value = [p_pos[0], p_pos[1], self._selected_feature.pos.value[2]]
+        self._selected_target.pos.value = [p_pos[0], p_pos[1], self._selected_target.pos.value[2]]
         self.cnvs.update_drawing()
 
     def _detect_point_inside_target(self, v_pos):

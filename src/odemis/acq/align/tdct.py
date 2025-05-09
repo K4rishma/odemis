@@ -141,7 +141,8 @@ def run_tdct_correlation(fib_coords: numpy.ndarray,
     rotation_center = (halfmax_dim, halfmax_dim, halfmax_dim)
 
     # get fib pixel size (meters)
-    fib_pixel_size = fib_image.metadata[model.MD_PIXEL_SIZE][0]
+    # fib_pixel_size = fib_image.metadata[model.MD_PIXEL_SIZE][0]
+    fib_pixel_size = 1
 
     # fib image shape minus metadata, fib_pixelsize (microns), fm_image_shape
     image_props = [fib_image.shape, fib_pixel_size * 1e6, fm_image.shape]

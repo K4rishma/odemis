@@ -20,6 +20,7 @@ You should have received a copy of the GNU General Public License along with
 Odemis. If not, see http://www.gnu.org/licenses/.
 
 """
+import copy
 import itertools
 import logging
 import os
@@ -37,7 +38,7 @@ import wx.html
 from odemis import model
 from odemis.acq.align.tdct import get_optimized_z_gauss, _convert_das_to_numpy_stack, run_tdct_correlation
 from odemis.acq.feature import save_features, FIBFMCorrelationData, Target
-from odemis.acq.stream import StaticFluoStream, StaticSEMStream, StaticStream, StaticFIBStream
+from odemis.acq.stream import StaticFluoStream, StaticSEMStream, StaticStream, StaticFIBStream, RGBStream
 from odemis.gui import conf
 from odemis.gui.util import call_in_wx_main
 from odemis.model import ListVA
@@ -188,7 +189,7 @@ class CorrelationPointsController(object):
 
         # Find the index of the stream in the stream list
         stream_index = next(
-            (i for i, stream in enumerate(self._tab_data_model.main.currentFeature.value.streams.value)
+            (i for i, stream in enumerate(self.streams_list)
              if stream == stream_obj), None)
 
         # If the stream exists in the list
@@ -268,6 +269,33 @@ class CorrelationPointsController(object):
             # Update the group visibility based on the latest changes
             self._tab_data_model.views.value[0].stream_tree.flat.subscribe(self._on_fm_streams_change, init=True)
 
+    def convert_rgb_to_sem(self, rgb_stream: RGBStream) -> StaticSEMStream:
+        """Convert an RGB stream to a SEM stream
+        :param rgb_stream: (RGBStream) the RGB stream to convert
+        :return: (StaticSEMStream) the converted SEM stream
+        """
+        d = rgb_stream.raw[0]
+        if isinstance(d, model.DataArrayShadow):
+            d = d.getData()
+
+        # get dim order, and select the first channel (arbitrary choice)
+        dims = d.metadata[model.MD_DIMS]
+        if dims == "YXC":
+            d = d[:, :, 0]
+        elif dims == "CYX":
+            d = d[0, :, :]
+
+        # convert to sem stream
+        sem_stream = StaticSEMStream(rgb_stream.name.value, raw=d)
+
+        # update md
+        sem_stream.raw[0].metadata = copy.deepcopy(d.metadata)
+        sem_stream.raw[0].metadata[model.MD_ACQ_TYPE] = model.MD_AT_EM
+        sem_stream.raw[0].metadata[model.MD_DIMS] = "YX"
+
+        return sem_stream
+
+
     def group_streams(self, streams: list = None) -> None:
         """
         Add the FIB and FM streams to the stream bar. The FM streams first need to be grouped based on the shape and
@@ -275,6 +303,8 @@ class CorrelationPointsController(object):
         :param streams: (list[StaticStream]) new streams to add
         """
         if streams:
+            if isinstance(streams[0], RGBStream):
+                streams = [self.convert_rgb_to_sem(streams[0])]
             # Load the FIB streams through the add streams button. In the final version, the FIB stream will be
             # loaded automatically and add streams button will be removed.
             # TODO remove special treatment for FIB
@@ -327,7 +357,7 @@ class CorrelationPointsController(object):
                     stream_groups[key] -= indices_to_remove
                     # Add the new stream index to the set
                     stream_groups[key].add(stream_index)
-            elif isinstance(stream, StaticFIBStream) or isinstance(stream, StaticSEMStream):
+            elif not isinstance(stream, StaticFluoStream): #isinstance(stream, StaticFIBStream) or isinstance(stream, StaticSEMStream):
                 key = (current_shape, centre_pos)
                 if key not in stream_groups:
                     stream_groups[key] = set()
