@@ -180,11 +180,16 @@ class FeaturesDecoder(json.JSONDecoder):
 
     def object_hook(self, obj):
         if 'name' in obj and 'pos' in obj:
-            correlation_data = obj["correlation_data"]
+            correlation_data = {}
+            if "correlation_data" in obj:
+                correlation_data = obj["correlation_data"]
             pos = obj['pos']
             feature = CryoFeature(obj['name'], pos[0], pos[1], pos[2])
             feature.status.value = obj['status']
-            feature.correlation_data = {k: FIBFMCorrelationData.from_dict(v) for k, v in correlation_data.items()}
+            if correlation_data:
+                feature.correlation_data = {k: FIBFMCorrelationData.from_dict(v) for k, v in correlation_data.items()}
+            else:
+                feature.correlation_data = None
             return feature
         if 'feature_list' in obj:
             return obj['feature_list']
