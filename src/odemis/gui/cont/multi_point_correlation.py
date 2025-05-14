@@ -447,8 +447,6 @@ class CorrelationPointsController(object):
                 self.change_queue.get_nowait()  # Remove older, outdated requests
             except queue.Empty:
                 break
-        logging.warning("Multipoint Correlation is running. It will handle the latest change.")
-        self.correlation_txt.SetLabel("Correlation RMS Deviation :  Calculating...")
         self.change_queue.put(True)  # Only enqueue the latest change request
 
     def _process_queue(self):
