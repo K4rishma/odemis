@@ -52,7 +52,8 @@ from odemis.gui.comp.canvas import (
     BitmapCanvas,
 )
 from odemis.gui.comp.overlay.centered_line import CenteredLineOverlay
-from odemis.gui.comp.overlay.cryo_feature import CryoFeatureOverlay
+from odemis.gui.comp.overlay.cryo_feature import CryoFeatureOverlay, \
+    CryoCorrelationFmPointsOverlay, CryoCorrelationFibPointsOverlay
 from odemis.gui.comp.overlay.dichotomy import DichotomyOverlay
 from odemis.gui.comp.overlay.ellipse import EllipseOverlay
 from odemis.gui.comp.overlay.fastem import FastEMROCOverlay, FastEMScintillatorOverlay
@@ -144,6 +145,8 @@ class DblMicroscopeCanvas(canvas.DraggableCanvas):
         self.dicho_overlay = None
         self.gadget_overlay = None
         self.cryofeature_overlay = None
+        self.cryotarget_fib_overlay = None
+        self.cryotarget_fm_overlay = None
 
         # play/pause icon
         self.play_overlay = PlayIconOverlay(self)
@@ -270,6 +273,10 @@ class DblMicroscopeCanvas(canvas.DraggableCanvas):
             self.cryofeature_overlay = CryoFeatureOverlay(self, tab_data)
             self.add_world_overlay(self.cryofeature_overlay)
             self.cryofeature_overlay.active.value = True
+
+        if guimodel.TOOL_FIDUCIAL in tools_possible:
+            self.cryotarget_fm_overlay = CryoCorrelationFmPointsOverlay(self, tab_data)
+            self.cryotarget_fib_overlay = CryoCorrelationFibPointsOverlay(self, tab_data)
 
         tab_data.tool.subscribe(self._on_tool, init=True)
 
@@ -1820,7 +1827,8 @@ class FastEMMainCanvas(DblMicroscopeCanvas):
         # List of overlays which handles creation, editing and removal of a shape class which
         # is a subclass of EditableShape class
         self.shapes_overlay = []
-        self.bg_overlay = None
+        self.bg_view_overlay = None
+        self.bg_world_overlay = None
         self.is_ctrl_down = False
         self.is_shape_tool_active = False
 
@@ -1828,8 +1836,11 @@ class FastEMMainCanvas(DblMicroscopeCanvas):
         """
         :param scintillator: The scintillator for which the background overlay need to be drawn.
         """
-        self.bg_overlay = FastEMScintillatorOverlay(cnvs=self, scintillator=scintillator)
-        self.add_world_overlay(self.bg_overlay)
+        self.bg_view_overlay = TextViewOverlay(cnvs=self)
+        self.bg_view_overlay.add_label(str(scintillator.number), font_size=40)
+        self.add_view_overlay(self.bg_view_overlay)
+        self.bg_world_overlay = FastEMScintillatorOverlay(cnvs=self, scintillator=scintillator)
+        self.add_world_overlay(self.bg_world_overlay)
 
     def remove_shape(self, shape):
         """
@@ -1863,8 +1874,8 @@ class FastEMMainCanvas(DblMicroscopeCanvas):
 
         :raises: ValueError in case it's called too early during GUI startup.
         """
-        if self.bg_overlay:
-            self.fit_to_bbox((self.bg_overlay.get_scintillator_bbox()))
+        if self.bg_world_overlay:
+            self.fit_to_bbox((self.bg_world_overlay.get_scintillator_bbox()))
         else:
             raise ValueError("Background overlay is not initialized yet.")
 
