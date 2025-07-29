@@ -1013,6 +1013,12 @@ class xrcpnl_tab_localization(wx.Panel):
         self.gauge_z_localization = xrc.XRCCTRL(self, "gauge_z_localization")
         self.lbl_stigmator_angle = xrc.XRCCTRL(self, "lbl_stigmator_angle")
         self.cmb_stigmator_angle = xrc.XRCCTRL(self, "cmb_stigmator_angle")
+        self.lbl_fiducial_size = xrc.XRCCTRL(self, "lbl_fiducial_size")
+        self.cmb_fiducial_size = xrc.XRCCTRL(self, "cmb_fiducial_size")
+        self.lbl_poi_size = xrc.XRCCTRL(self, "lbl_poi_size")
+        self.cmb_poi_size = xrc.XRCCTRL(self, "cmb_poi_size")
+        self.btn_delete_target = xrc.XRCCTRL(self, "btn_delete_target")
+        self.lbl_select_target = xrc.XRCCTRL(self, "lbl_select_target")
         self.fp_settings_secom_optical = xrc.XRCCTRL(self, "fp_settings_secom_optical")
         self.fp_secom_streams = xrc.XRCCTRL(self, "fp_secom_streams")
         self.pnl_secom_streams = xrc.XRCCTRL(self, "pnl_secom_streams")
@@ -11998,6 +12004,92 @@ D\xc48\xc6qd\x1b\xed\x886\x1a\xa5\x00\x00D0\xc6\x181?\x03\x96\xf6I\x16\
                                   </object>
                                   <flag>wxLEFT</flag>
                                   <border>10</border>
+                                </object>
+                                <orient>wxHORIZONTAL</orient>
+                              </object>
+                              <flag>wxLEFT|wxBOTTOM</flag>
+                              <border>10</border>
+                            </object>
+                            <object class="sizeritem">
+                              <object class="wxBoxSizer">
+                                <object class="sizeritem">
+                                  <object class="wxStaticText" name="lbl_fiducial_size">
+                                    <label>Fiducial size</label>
+                                    <fg>#DDDDDD</fg>
+                                    <XRCED>
+                                      <assign_var>1</assign_var>
+                                    </XRCED>
+                                  </object>
+                                </object>
+                                <object class="sizeritem">
+                                  <object class="OwnerDrawnComboBox" name="cmb_fiducial_size">
+                                    <size>110,16</size>
+                                    <fg>#2FA7D4</fg>
+                                    <bg>#333333</bg>
+                                    <style>wxBORDER_NONE|wxCB_DROPDOWN|wxCB_READONLY|wxTE_PROCESS_ENTER
+                                    </style>
+                                    <XRCED>
+                                      <assign_var>1</assign_var>
+                                    </XRCED>
+                                  </object>
+                                  <flag>wxLEFT</flag>
+                                  <border>10</border>
+                                </object>
+                                <orient>wxHORIZONTAL</orient>
+                              </object>
+                              <flag>wxLEFT|wxBOTTOM</flag>
+                              <border>10</border>
+                            </object>
+                            <object class="sizeritem">
+                              <object class="wxBoxSizer">
+                                <object class="sizeritem">
+                                  <object class="wxStaticText" name="lbl_poi_size">
+                                    <label>POI size     </label>
+                                    <fg>#DDDDDD</fg>
+                                    <XRCED>
+                                      <assign_var>1</assign_var>
+                                    </XRCED>
+                                  </object>
+                                </object>
+                                <object class="sizeritem">
+                                  <object class="OwnerDrawnComboBox" name="cmb_poi_size">
+                                    <size>110,16</size>
+                                    <fg>#2FA7D4</fg>
+                                    <bg>#333333</bg>
+                                    <style>wxBORDER_NONE|wxCB_DROPDOWN|wxCB_READONLY|wxTE_PROCESS_ENTER
+                                    </style>
+                                    <XRCED>
+                                      <assign_var>1</assign_var>
+                                    </XRCED>
+                                  </object>
+                                  <flag>wxLEFT</flag>
+                                  <border>17</border>
+                                </object>
+                                <orient>wxHORIZONTAL</orient>
+                              </object>
+                              <flag>wxLEFT|wxBOTTOM</flag>
+                              <border>10</border>
+                            </object>
+                            <object class="sizeritem">
+                              <object class="wxBoxSizer">
+                                <object class="sizeritem">
+                                  <object class="ImageButton" name="btn_delete_target">
+                                    <icon>______img_icon_ico_trash_png</icon>
+                                    <height>16</height>
+                                    <style>wxALIGN_CENTRE</style>
+                                  </object>
+                                </object>
+                                <object class="sizeritem">
+                                  <object class="wxStaticText" name="lbl_select_target">
+                                    <label>No Target Selected</label>
+                                    <style>wxALIGN_CENTRE</style>
+                                    <XRCED>
+                                      <assign_var>1</assign_var>
+                                    </XRCED>
+                                    <fg>#DDDDDD</fg>
+                                  </object>
+                                  <flag>wxLEFT</flag>
+                                  <border>3</border>
                                 </object>
                                 <orient>wxHORIZONTAL</orient>
                               </object>

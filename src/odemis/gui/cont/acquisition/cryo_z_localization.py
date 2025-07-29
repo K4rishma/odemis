@@ -39,6 +39,7 @@ from odemis.acq.move import FM_IMAGING
 from odemis.acq.stream import FluoStream
 from odemis.gui import conf
 from odemis.gui.comp import popup
+from odemis.gui.model import TOOL_FIDUCIAL
 from odemis.gui.util import call_in_wx_main
 from odemis.gui.util.widgets import (
     ProgressiveFutureConnector,
@@ -76,6 +77,20 @@ class CryoZLocalizationController(object):
             self._panel.menu_localization_streams.Hide()
             self._panel.Layout()
             return
+
+        # self.tab_data.tool if hasattr(self.tab_data, "tool") else None
+        if TOOL_FIDUCIAL in self._tab_data.tool.choices:
+            self._panel.lbl_stigmator_angle.Hide()
+            self._panel.cmb_stigmator_angle.Hide()
+            self._panel.Layout()
+        else:
+            self._panel.lbl_fiducial_size.Hide()
+            self._panel.cmb_fiducial_size.Hide()
+            self._panel.lbl_poi_size.Hide()
+            self._panel.cmb_poi_size.Hide()
+            self._panel.btn_delete_target.Hide()
+            self._panel.lbl_select_target.Hide()
+            self._panel.Layout()
 
         # Connect the button and combobox
         self._panel.btn_z_localization.Bind(wx.EVT_BUTTON, self._on_z_localization)

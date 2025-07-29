@@ -69,7 +69,7 @@ from odemis.model import (
     IntEnumerated,
     StringEnumerated,
     StringVA,
-    VigilantAttribute,
+    VigilantAttribute, getComponent,
 )
 from odemis.util.filename import create_filename, make_unique_name
 
@@ -346,6 +346,15 @@ class CryoLocalizationGUIData(CryoGUIData):
 
         # Current tool selected (from the toolbar)
         tools = {TOOL_NONE, TOOL_RULER, TOOL_FEATURE}
+        if main.stigmator:
+            stig = getComponent(role="stigmator")
+            stig_md = stig.getMetadata()
+            stig_calib = stig_md.get(model.MD_CALIB, None)
+            for key, subdict in stig_calib.items():
+                if 'angle' in subdict:
+                    tools = {TOOL_NONE, TOOL_RULER, TOOL_FEATURE, TOOL_FIDUCIAL, TOOL_REGION_OF_INTEREST}
+                    break
+
         # Update the tool selection with the new tool list
         self.tool.choices = tools
         # VA for autofocus procedure mode
