@@ -350,10 +350,41 @@ class CryoLocalizationGUIData(CryoGUIData):
             stig = getComponent(role="stigmator")
             stig_md = stig.getMetadata()
             stig_calib = stig_md.get(model.MD_CALIB, None)
-            for key, subdict in stig_calib.items():
-                if 'angle' in subdict:
-                    tools = {TOOL_NONE, TOOL_RULER, TOOL_FEATURE, TOOL_FIDUCIAL, TOOL_REGION_OF_INTEREST}
+
+            if not stig_calib:
+                logging.warning("stigmator component present, but no MD_CALIB, Z localization will be disabled")
+            else:
+                for key, subdict in stig_calib.items():
+                    if 'angle' in subdict:
+                        tools = {TOOL_NONE, TOOL_RULER, TOOL_FEATURE, TOOL_FIDUCIAL, TOOL_REGION_OF_INTEREST}
+                        target_sizes = frozenset(stig_calib.keys())
+                        self.targetSize = model.FloatEnumerated(min(target_sizes), choices=target_sizes, unit="m")
+                    else:
+                        angles = frozenset(stig_calib.keys())
+                        rng = main.stigmator.axes["rz"].range
+                        for a in angles:
+                            if not rng[0] <= a <= rng[1]:
+                                raise ValueError(f"stigmator MD_CALIB has angle {a} outside of range {rng}.")
+
+                        self.stigmatorAngle = model.FloatEnumerated(min(angles), choices=angles)
+
                     break
+
+        # if main.stigmator:
+        #     # stigmator should have a "MD_CALIB" containing a dict[float, dict],
+        #     # where the key is the stigmator angle (rad), and the value contains
+        #     # the calibration to pass to z_localization.determine_z_position().
+        #     calib = main.stigmator.getMetadata().get(MD_CALIB)
+        #     if calib:
+        #         angles = frozenset(calib.keys())
+        #         rng = main.stigmator.axes["rz"].range
+        #         for a in angles:
+        #             if not rng[0] <= a <= rng[1]:
+        #                 raise ValueError(f"stigmator MD_CALIB has angle {a} outside of range {rng}.")
+        #
+        #         self.stigmatorAngle = model.FloatEnumerated(min(angles), choices=angles)
+        #     else:
+        #         logging.warning("stigmator component present, but no MD_CALIB, Z localization will be disabled")
 
         # Update the tool selection with the new tool list
         self.tool.choices = tools
@@ -387,22 +418,6 @@ class CryoLocalizationGUIData(CryoGUIData):
         self.streams.subscribe(self._on_stream_change, init=True)
 
         self.view_posture = model.VigilantAttribute(FM_IMAGING)
-
-        if main.stigmator:
-            # stigmator should have a "MD_CALIB" containing a dict[float, dict],
-            # where the key is the stigmator angle (rad), and the value contains
-            # the calibration to pass to z_localization.determine_z_position().
-            calib = main.stigmator.getMetadata().get(MD_CALIB)
-            if calib:
-                angles = frozenset(calib.keys())
-                rng = main.stigmator.axes["rz"].range
-                for a in angles:
-                    if not rng[0] <= a <= rng[1]:
-                        raise ValueError(f"stigmator MD_CALIB has angle {a} outside of range {rng}.")
-
-                self.stigmatorAngle = model.FloatEnumerated(min(angles), choices=angles)
-            else:
-                logging.warning("stigmator component present, but no MD_CALIB, Z localization will be disabled")
 
     def _updateZParams(self):
         # Calculate the new range of z pos

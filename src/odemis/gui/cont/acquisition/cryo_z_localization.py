@@ -69,20 +69,47 @@ class CryoZLocalizationController(object):
             self._stigmator.moveAbs({"rz": 0})
 
         # If the hardware doesn't support for Z localization, hide everything and don't control anything
-        if not hasattr(tab_data, "stigmatorAngle"):
+        if not hasattr(tab_data, "stigmatorAngle") and not hasattr(tab_data, "targetSize"):
             self._panel.btn_z_localization.Hide()
             self._panel.lbl_z_localization.Hide()
             self._panel.lbl_stigmator_angle.Hide()
             self._panel.cmb_stigmator_angle.Hide()
             self._panel.menu_localization_streams.Hide()
+            self._panel.lbl_fiducial_size.Hide()
+            self._panel.cmb_fiducial_size.Hide()
+            self._panel.lbl_poi_size.Hide()
+            self._panel.cmb_poi_size.Hide()
+            self._panel.btn_delete_target.Hide()
+            self._panel.lbl_select_target.Hide()
             self._panel.Layout()
             return
 
-        # self.tab_data.tool if hasattr(self.tab_data, "tool") else None
-        if TOOL_FIDUCIAL in self._tab_data.tool.choices:
+        # Connect menu for stream selection for Localization z
+        # TODO: listen to the current stream, to update the time estimation
+        self._acq_future = model.InstantaneousFuture()
+        self._menu_to_stream = {}
+        self._selected_stream = None
+        self._panel.menu_localization_streams.Bind(wx.EVT_BUTTON, self._create_stream_menu)
+        self._tab_data.streams.subscribe(self._on_streams, init=True)
+
+        tool =  self._tab_data.tool if hasattr(self._tab_data, "tool") else None
+        if tool and TOOL_FIDUCIAL in tool.choices:
             self._panel.lbl_stigmator_angle.Hide()
             self._panel.cmb_stigmator_angle.Hide()
             self._panel.Layout()
+
+            self._panel.btn_z_localization.Bind(wx.EVT_BUTTON, self._on_z_localization)
+            self._localization_btn_label = self._panel.btn_z_localization.GetLabel()
+
+            # Fill the combobox with the available target sizes
+            for size in sorted(tab_data.targetSize.choices):
+                size_str = units.readable_str(size, unit="m")
+                self._panel.cmb_fiducial_size.Append(size_str, size)
+
+            for size in sorted(tab_data.targetSize.choices):
+                size_str = units.readable_str(size, unit="m")
+                self._panel.cmb_poi_size.Append(size_str, size)
+
         else:
             self._panel.lbl_fiducial_size.Hide()
             self._panel.cmb_fiducial_size.Hide()
@@ -92,32 +119,23 @@ class CryoZLocalizationController(object):
             self._panel.lbl_select_target.Hide()
             self._panel.Layout()
 
-        # Connect the button and combobox
-        self._panel.btn_z_localization.Bind(wx.EVT_BUTTON, self._on_z_localization)
-        self._localization_btn_label = self._panel.btn_z_localization.GetLabel()
+            # Connect the button and combobox
+            self._panel.btn_z_localization.Bind(wx.EVT_BUTTON, self._on_z_localization)
+            self._localization_btn_label = self._panel.btn_z_localization.GetLabel()
 
-        # Connect menu for stream selection for Localization z
-        self._acq_future = model.InstantaneousFuture()
-        self._menu_to_stream = {}
-        self._selected_stream = None
-        self._panel.menu_localization_streams.Bind(wx.EVT_BUTTON, self._create_stream_menu)
-        self._tab_data.streams.subscribe(self._on_streams, init=True)
+            # Fill the combobox with the available stigmator angles
+            for angle in sorted(tab_data.stigmatorAngle.choices):
+                angle_str = units.to_string_pretty(math.degrees(angle), 3, "°")
+                self._panel.cmb_stigmator_angle.Append(angle_str, angle)
 
-        # Fill the combobox with the available stigmator angles
-        for angle in sorted(tab_data.stigmatorAngle.choices):
-            angle_str = units.to_string_pretty(math.degrees(angle), 3, "°")
-            self._panel.cmb_stigmator_angle.Append(angle_str, angle)
-
-        self._cmb_vac = VigilantAttributeConnector(
-            va=self._tab_data.stigmatorAngle,
-            value_ctrl=self._panel.cmb_stigmator_angle,
-            events=wx.EVT_COMBOBOX,
-            va_2_ctrl=self._cmb_stig_angle_set,
-            ctrl_2_va=self._cmb_stig_angle_get
-        )
-        self._acq_future_connector = None  # ProgressiveFutureConnector, if running
-
-        # TODO: listen to the current stream, to update the time estimation
+            self._cmb_vac = VigilantAttributeConnector(
+                va=self._tab_data.stigmatorAngle,
+                value_ctrl=self._panel.cmb_stigmator_angle,
+                events=wx.EVT_COMBOBOX,
+                va_2_ctrl=self._cmb_stig_angle_set,
+                ctrl_2_va=self._cmb_stig_angle_get
+            )
+            self._acq_future_connector = None  # ProgressiveFutureConnector, if running
 
         # To check that a feature is selected
         tab_data.main.currentFeature.subscribe(self._check_button_available, init=True)
