@@ -358,7 +358,8 @@ class CryoLocalizationGUIData(CryoGUIData):
                     if 'angle' in subdict:
                         tools = {TOOL_NONE, TOOL_RULER, TOOL_FEATURE, TOOL_FIDUCIAL, TOOL_REGION_OF_INTEREST}
                         target_sizes = frozenset(stig_calib.keys())
-                        self.targetSize = model.FloatEnumerated(min(target_sizes), choices=target_sizes, unit="m")
+                        self.fiducial_size = model.FloatEnumerated(min(target_sizes), choices=target_sizes, unit="m")
+                        self.poi_size = model.FloatEnumerated(min(target_sizes), choices=target_sizes, unit="m")
                     else:
                         angles = frozenset(stig_calib.keys())
                         rng = main.stigmator.axes["rz"].range

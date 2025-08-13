@@ -26,12 +26,15 @@ from concurrent.futures import CancelledError
 
 import numpy
 from Pyro4.futures import FINISHED, CANCELLED, RUNNING
+from mpmath import chebyt
 
 from odemis import dataio, model, util
 from odemis.acq import acqmng
+from odemis.acq.feature import CryoFeature, Target, TargetType
+from odemis.acq.stream import FluoStream
 from odemis.model import ProgressiveFuture
 import time
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 
 try:
     from skimage import io, exposure
@@ -43,6 +46,9 @@ except ImportError as exp:
                     "The function determine_z_position will not work.\n"
                     "%s", exp)
     psf_extractor = None
+
+MAX_ITERATIONS = 3  # Maximum number of iterations to determine the z position of the target
+SUPERZ_THRESHOLD = 50e-9  # 50 nm, if the difference is less than this, we consider it good enough
 
 
 def huang(z, calibration_data):
@@ -237,19 +243,6 @@ def measure_z(stigmator, angle: float, pos: Tuple[float, float], stream, logpath
     util.executeAsyncTask(f, _do_measure_z, args=(f, stigmator, angle, pos, stream, logpath))
     return f
 
-def estimate_measure_z(stigmator, angle: float, pos: Tuple[float, float], stream) -> float:
-    """
-    Estimate the time measure_z() will take.
-    parameters: same as measure_z()
-    return float: duration in s
-    """
-    # 1 s: move stigmator
-    # can vary: Acquire stream (typically, < 1s)
-    # 1 s: determine_z_position
-    # 1 s: move back stigmator
-    return 3 + acqmng.estimateTime([stream])
-
-
 def _do_measure_z(f: ProgressiveFuture, stigmator, angle: float, pos: Tuple[float, float], stream,
                   logpath: Optional[str] = None):
     """
@@ -328,6 +321,164 @@ def _do_measure_z(f: ProgressiveFuture, stigmator, angle: float, pos: Tuple[floa
         f.result(timeout=600)
         f._task_state = FINISHED
 
+def estimate_measure_z(stigmator, angle: float, pos: Tuple[float, float], stream) -> float:
+    """
+    Estimate the time measure_z() will take.
+    parameters: same as measure_z()
+    return float: duration in s
+    """
+    # 1 s: move stigmator
+    # can vary: Acquire stream (typically, < 1s)
+    # 1 s: determine_z_position
+    # 1 s: move back stigmator
+    return 3 + acqmng.estimateTime([stream])
+
+def superz_manager(stigmator, focus, poi_size : float, stream: FluoStream,
+                   pois: List[Target], fiducials: Optional[List[Target]] = None,
+                   fiducial_size: Optional[float] = None, logpath: Optional[str] = None) -> ProgressiveFuture:
+    """
+    Run the SuperZ manager (automate) on the given targets of the currently selected feature and stream.
+    :param stigmator:
+    :param focus:
+    :param poi_size:
+    :param stream:
+    :param pois:
+    :param fiducials:
+    :param fiducial_size:
+    :param logpath:
+    :return:
+    """
+    # Create ProgressiveFuture and run it in a separate thread.
+    est_start = time.time() + 0.1
+
+    f = ProgressiveFuture(start=est_start,
+                          end=est_start + estimate_superz_manager(pois, stream, fiducials=fiducials))
+
+    # For now, it's impossible to cancel (it's very short anyway)
+    f._task_state = RUNNING
+    f._task_lock = threading.Lock()
+    f.task_canceller = _cancel_localization
+    f.running_subf = model.InstantaneousFuture()
+
+    # Run in separate thread
+    util.executeAsyncTask(f, _run_superz_manager, args=(f, stigmator, focus, poi_size, stream,
+                                                        pois, fiducials, fiducial_size, logpath))
+    return f
+
+def estimate_superz_manager(pois: List[Target], stream: FluoStream, fiducials: Optional[List[Target]] = None) -> float:
+    """
+    Estimate the time measure_z() will take.
+    parameters: same as measure_z()
+    return float: duration in s
+    """
+    # Coarse time estimation which is similar to estimate_measure_z(stigmator, angle, pos, stream).
+    # Multiplied with the available targets and number of iterations for repeating the localization.
+    # Estimate the average time for running standard SuperZ workflow repetition which is one less than the MAX_ITERATIONS.
+    total_targets = len(pois) + (len(fiducials) if fiducials else 0)
+    return (MAX_ITERATIONS - 1) * total_targets * (3 + acqmng.estimateTime([stream]))
+
+def _run_superz_manager(f: ProgressiveFuture, stigmator, focus, poi_size: float, stream: FluoStream,
+                     pois: List[Target], fiducials: Optional[List[Target]] = None, fiducial_size: Optional[float] = None,
+                     logpath: Optional[str] = None):
+    try:
+        if logpath:
+            exporter = dataio.find_fittest_converter(logpath)
+
+        # TODO: handle floating point errors? (for now we pass always the exact same value, so no need)
+        targets = []
+        calib_dict = {TargetType.PointOfInterest: {},
+                      TargetType.Fiducial: {}}
+        try:
+            calib_dict[TargetType.PointOfInterest] = stigmator.getMetadata()[model.MD_CALIB][poi_size]
+            # Restricted to support for one poi
+            targets.append(pois[0])
+        except KeyError:
+            raise KeyError(f"No CALIB found for POI size {poi_size} m")
+
+        if fiducials:
+            try:
+                calib_dict[TargetType.Fiducial] = stigmator.getMetadata()[model.MD_CALIB][fiducial_size]
+                targets.append(fiducials)
+            except KeyError:
+                raise KeyError(f"No CALIB found for fiducial size {fiducial_size} m")
+
+        # Crop the part of the image that should contain the feature (as a square around the feature)
+        # We arbitrarily take a with of 20 x the supposed PSF FWHM.
+        # The PSF includes the binning, so need for any extra tweak
+        half_width = int(math.ceil(10 * stream.detector.pointSpreadFunctionSize.value))  # px
+        for target in targets:
+            calib = calib_dict[target.target_type]
+            # Change the stigmator angle
+            with f._task_lock:
+                if f._task_state == CANCELLED:
+                    raise CancelledError
+                f.running_subf = stigmator.moveAbs({"rz": calib["angle"]})
+            f.running_subf.result(timeout=600)
+            # Iterate for maximum 3 times
+            iteration = 0
+            while iteration <= MAX_ITERATIONS:
+                # Move the focus to the set target position
+                with f._task_lock:
+                    if f._task_state == CANCELLED:
+                        raise CancelledError
+                    f.running_subf = focus.moveAbs({"z": target.fm_focus_position.value})
+                f.running_subf.result(timeout=600)
+                # Acquire an image of the spot
+                # Typically ex is always None as we acquire only one stream (an error will directly raise a exception)
+                # so we don't check it.
+                with f._task_lock:
+                    if f._task_state == CANCELLED:
+                        raise CancelledError
+                    f.running_subf = acqmng.acquire([stream])
+                data, ex = f.running_subf.result(timeout=600)
+                im = data[0]
+                if len(data) != 1:
+                    logging.warning("Unexpected extra DataArray from acquisition: %s", data)
+
+                # TODO do we need check the boundary box, if targets are placed on live stream?
+                pos = target.coordinates.value[0:2]  # (X, Y) in metres of the sample plane
+                pos_px = stream.getPixelCoordinates(pos, check_bbox=False)  # pixels<---metres
+                if pos_px is None:
+                    raise ValueError(f"Target position {pos} is outside of "
+                                     f"current FoV {stream.getBoundingBox()}")
+                logging.debug("Feature is at %s, corresponding to %s px, will crop %s pixels around",
+                              pos, pos_px, 2 * half_width)
+                sub_im = im[max(0, pos_px[1] - half_width):pos_px[1] + half_width,  # Y
+                max(0, pos_px[0] - half_width):pos_px[0] + half_width]  # X
+
+                logging.debug(f"RoI for target {target.name.value} has shape {sub_im.shape}")
+                if logpath:
+                    # TODO update the sub_im metadata so that it's displayed at the right position
+                    exporter.export(logpath, data + [sub_im])
+
+                # Perform the localization
+                with f._task_lock:
+                    if f._task_state == CANCELLED:
+                        raise CancelledError
+                zshift, warning = determine_z_position(sub_im, calib)
+                new_focus_position = target.fm_focus_position.value + zshift
+
+                # Update Z position of the target and check the SuperZ accuracy to determine if we need to carry on
+                # the localization process for the third time, otherwise we can stop and continue with the next target.
+                # What to do if z shift is weird or can collide with the stage?
+                logging.debug(f"Target {target.name.value} z shift is {zshift} m, iteration {iteration + 1}, "
+                              f"focus position is {target.fm_focus_position.value} m, "
+                              f"new focus position is {new_focus_position} m, ")
+                target.fm_focus_position.value = new_focus_position
+
+                # TODO change the icon of the target depending on the accuracy of the localization
+                if zshift < SUPERZ_THRESHOLD and iteration > 0:
+                    break
+
+                iteration +=1
+                # return zshift, warning
+    except CancelledError:
+        raise
+
+    finally:
+        f = stigmator.moveAbs({"rz": 0})
+        f.result(timeout=600)
+        f._task_state = FINISHED
 
 def _cancel_localization(future) -> bool:
     """

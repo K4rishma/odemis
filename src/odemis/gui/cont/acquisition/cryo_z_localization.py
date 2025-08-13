@@ -110,6 +110,22 @@ class CryoZLocalizationController(object):
                 size_str = units.readable_str(size, unit="m")
                 self._panel.cmb_poi_size.Append(size_str, size)
 
+            self._cmb_vac_fiducial_size = VigilantAttributeConnector(
+                va=self._tab_data.fidcucial_size,
+                value_ctrl=self._panel.cmb_fiducial_size,
+                events=wx.EVT_COMBOBOX,
+                va_2_ctrl=self._cmb_fiducial_size_set,
+                ctrl_2_va=self._cmb_fiducial_size_get
+            )
+
+            self._cmb_vac_poi_size = VigilantAttributeConnector(
+                va=self._tab_data.poi_size,
+                value_ctrl=self._panel.cmb_poi_size,
+                events=wx.EVT_COMBOBOX,
+                va_2_ctrl=self._cmb_poi_size_set,
+                ctrl_2_va=self._cmb_poi_size_get
+            )
+
         else:
             self._panel.lbl_fiducial_size.Hide()
             self._panel.cmb_fiducial_size.Hide()
@@ -165,6 +181,50 @@ class CryoZLocalizationController(object):
         else:
             logging.warning("Combobox stigmator angle has no value %s", value)
 
+    def _cmb_fiducial_size_get(self):
+        """
+        Change the current size based on the dropdown selection
+        """
+        i = self._panel.cmb_fiducial_size.GetSelection()
+        if i == wx.NOT_FOUND:
+            logging.warning("cmb_fiducial_size has unknown value.")
+            return
+        size = self._panel.cmb_fiducial_size.GetClientData(i)
+        return size
+
+    def _cmb_fiducial_size_set(self, value):
+        ctrl = self._panel.cmb_fiducial_size
+        for i in range(ctrl.GetCount()):
+            d = ctrl.GetClientData(i)
+            if d == value:
+                logging.debug("Setting combobox value to %s", ctrl.Items[i])
+                ctrl.SetSelection(i)
+                break
+        else:
+            logging.warning("Combobox fiducial size has no value %s", value)
+
+    def _cmb_poi_size_get(self):
+        """
+        Change the current size based on the dropdown selection
+        """
+        i = self._panel.cmb_poi_size.GetSelection()
+        if i == wx.NOT_FOUND:
+            logging.warning("cmb_poi_size has unknown value.")
+            return
+        size = self._panel.cmb_poi_size.GetClientData(i)
+        return size
+
+    def _cmb_poi_size_set(self, value):
+        ctrl = self._panel.cmb_poi_size
+        for i in range(ctrl.GetCount()):
+            d = ctrl.GetClientData(i)
+            if d == value:
+                logging.debug("Setting combobox value to %s", ctrl.Items[i])
+                ctrl.SetSelection(i)
+                break
+        else:
+            logging.warning("Combobox poi size has no value %s", value)
+
     @call_in_wx_main
     def _check_button_available(self, _):
         # Only possible to run the function iff:
@@ -219,9 +279,56 @@ class CryoZLocalizationController(object):
         """Start or cancel the localization method when the button is clicked"""
         # If localization is running, cancel it, otherwise start one
         if self._acq_future.done():
-            self._start_z_localization()
+            self._start_z_localization_v1()
         else:
             self._acq_future.cancel()
+
+    def _start_z_localization_v1(self):
+        """
+        Called on button press, to start the localization
+        """
+        s = self._selected_stream
+        if s is None:
+            raise ValueError("No FM stream available to acquire a image of the the feature")
+
+        # The button is disabled when no feature is selected, but better check
+        feature = self._tab_data.main.currentFeature.value
+        if feature is None:
+            raise ValueError("Select a feature first to specify the Z localization in X/Y")
+        if self._tab_data.main.posture_manager.current_posture.value != FM_IMAGING:
+            raise ValueError("The current posture is not FM imaging, cannot do Z localization")
+        stage_pos = feature.get_posture_position(FM_IMAGING)
+        pos = self._tab_data.main.posture_manager.to_sample_stage_from_stage_position(stage_pos)
+
+        # Disable the GUI and show the progress bar
+        self._tab.streambar_controller.pauseStreams()
+        self._tab.streambar_controller.pause()
+
+        self._panel.lbl_z_localization.Hide()
+        self._panel.gauge_z_localization.Show()
+        self._tab_data.main.is_acquiring.value = True
+        self._panel.Layout()
+
+        # Store the acquisition somewhere, for debugging purposes
+        acq_conf = conf.get_acqui_conf()
+        fn = create_filename(acq_conf.pj_last_path, "{datelng}-{timelng}-superz", ".ome.tiff")
+        assert fn.endswith(".ome.tiff")
+
+        # The angles of stigmatorAngle should come from MD_CALIB, so it's relatively safe
+        poi_size = self._tab_data.poi_size.value
+        fiducial_size = self._tab_data.fidcucial_size.value
+        correlation_data = self._tab_data.currentFeature.value.correlation_data[self._tab_data.currentFeature.value.status.value]
+        if correlation_data:
+            pois = correlation_data.get("fm_pois", [])
+            fiducials = correlation_data.get("fm_fiducials", [])
+            # TODO add poi as current feature if no pot is available
+        # self._acq_future = z_localization.superz_manager(stigmator=._stigmator, focus= self._fo  logpath=fn)
+        self._panel.btn_z_localization.SetLabel("Cancel")
+
+        self._acq_future_connector = ProgressiveFutureConnector(self._acq_future,
+                                                                self._panel.gauge_z_localization)
+
+        self._acq_future.add_done_callback(self._on_measure_z_done)
 
     def _start_z_localization(self):
         """
