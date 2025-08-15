@@ -27,6 +27,7 @@ from concurrent.futures import CancelledError
 import numpy
 from Pyro4.futures import FINISHED, CANCELLED, RUNNING
 from mpmath import chebyt
+from odemis.gui import conf
 
 from odemis import dataio, model, util
 from odemis.acq import acqmng
@@ -35,6 +36,8 @@ from odemis.acq.stream import FluoStream
 from odemis.model import ProgressiveFuture
 import time
 from typing import Tuple, Optional, List
+
+from odemis.util.filename import create_filename
 
 try:
     from skimage import io, exposure
@@ -378,19 +381,15 @@ def estimate_superz_manager(pois: List[Target], stream: FluoStream, fiducials: O
     return (MAX_ITERATIONS - 1) * total_targets * (3 + acqmng.estimateTime([stream]))
 
 def _run_superz_manager(f: ProgressiveFuture, stigmator, focus, poi_size: float, stream: FluoStream,
-                     pois: List[Target], fiducials: Optional[List[Target]] = None, fiducial_size: Optional[float] = None,
-                     logpath: Optional[str] = None):
+                     pois: List[Target], fiducials: Optional[List[Target]] = None, fiducial_size: Optional[float] = None) -> None:
     try:
-        if logpath:
-            exporter = dataio.find_fittest_converter(logpath)
-
-        # TODO: handle floating point errors? (for now we pass always the exact same value, so no need)
+        exporter = None
         targets = []
         calib_dict = {TargetType.PointOfInterest: {},
                       TargetType.Fiducial: {}}
         try:
             calib_dict[TargetType.PointOfInterest] = stigmator.getMetadata()[model.MD_CALIB][poi_size]
-            # Restricted to support for one poi
+            # Restricted the support for one poi
             targets.append(pois[0])
         except KeyError:
             raise KeyError(f"No CALIB found for POI size {poi_size} m")
@@ -407,7 +406,7 @@ def _run_superz_manager(f: ProgressiveFuture, stigmator, focus, poi_size: float,
         # The PSF includes the binning, so need for any extra tweak
         half_width = int(math.ceil(10 * stream.detector.pointSpreadFunctionSize.value))  # px
         for target in targets:
-            calib = calib_dict[target.target_type]
+            calib = calib_dict[target.type.value]
             # Change the stigmator angle
             with f._task_lock:
                 if f._task_state == CANCELLED:
@@ -439,7 +438,7 @@ def _run_superz_manager(f: ProgressiveFuture, stigmator, focus, poi_size: float,
                 pos = target.coordinates.value[0:2]  # (X, Y) in metres of the sample plane
                 pos_px = stream.getPixelCoordinates(pos, check_bbox=False)  # pixels<---metres
                 if pos_px is None:
-                    raise ValueError(f"Target position {pos} is outside of "
+                    raise ValueError(f"Target {target.name.value} position {pos} is outside of "
                                      f"current FoV {stream.getBoundingBox()}")
                 logging.debug("Feature is at %s, corresponding to %s px, will crop %s pixels around",
                               pos, pos_px, 2 * half_width)
@@ -447,9 +446,14 @@ def _run_superz_manager(f: ProgressiveFuture, stigmator, focus, poi_size: float,
                 max(0, pos_px[0] - half_width):pos_px[0] + half_width]  # X
 
                 logging.debug(f"RoI for target {target.name.value} has shape {sub_im.shape}")
-                if logpath:
-                    # TODO update the sub_im metadata so that it's displayed at the right position
-                    exporter.export(logpath, data + [sub_im])
+
+                # Store the acquisition somewhere, for debugging purposes
+                acq_conf = conf.get_acqui_conf()
+                fn = create_filename(acq_conf.pj_last_path, "{datelng}-{timelng}-{target.name.value}-superz", ".ome.tiff")
+                assert fn.endswith(".ome.tiff")
+                if not exporter:
+                    exporter = dataio.find_fittest_converter(fn)
+                exporter.export(fn, data + [sub_im])
 
                 # Perform the localization
                 with f._task_lock:
@@ -457,6 +461,11 @@ def _run_superz_manager(f: ProgressiveFuture, stigmator, focus, poi_size: float,
                         raise CancelledError
                 zshift, warning = determine_z_position(sub_im, calib)
                 new_focus_position = target.fm_focus_position.value + zshift
+
+                if abs(zshift) > 100e-6:
+                    # TODO change the icon color of the target to red
+                    logging.warning("Z pos shift for target %s detected of %s, but not going there as it had warning %s", target.name.value, zshift, warning)
+                    # break
 
                 # Update Z position of the target and check the SuperZ accuracy to determine if we need to carry on
                 # the localization process for the third time, otherwise we can stop and continue with the next target.

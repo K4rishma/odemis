@@ -59,6 +59,7 @@ class CryoZLocalizationController(object):
         self._tab_data = tab_data
         self._tab = tab
         self._stigmator = tab_data.main.stigmator
+        self._focus = tab_data.main.focus
 
         # Note: there could be some (odd) configurations with a stigmator, but
         # no stigmator calibration (yet). In that case, we should still move the
@@ -93,7 +94,9 @@ class CryoZLocalizationController(object):
         self._tab_data.streams.subscribe(self._on_streams, init=True)
 
         tool =  self._tab_data.tool if hasattr(self._tab_data, "tool") else None
+        self._localization = None
         if tool and TOOL_FIDUCIAL in tool.choices:
+            self._localization = self._start_z_manager
             self._panel.lbl_stigmator_angle.Hide()
             self._panel.cmb_stigmator_angle.Hide()
             self._panel.Layout()
@@ -127,6 +130,7 @@ class CryoZLocalizationController(object):
             )
 
         else:
+            self._localization = self._start_z_localization
             self._panel.lbl_fiducial_size.Hide()
             self._panel.cmb_fiducial_size.Hide()
             self._panel.lbl_poi_size.Hide()
@@ -279,11 +283,11 @@ class CryoZLocalizationController(object):
         """Start or cancel the localization method when the button is clicked"""
         # If localization is running, cancel it, otherwise start one
         if self._acq_future.done():
-            self._start_z_localization_v1()
+            self._localization()
         else:
             self._acq_future.cancel()
 
-    def _start_z_localization_v1(self):
+    def _start_z_manager(self):
         """
         Called on button press, to start the localization
         """
@@ -309,11 +313,6 @@ class CryoZLocalizationController(object):
         self._tab_data.main.is_acquiring.value = True
         self._panel.Layout()
 
-        # Store the acquisition somewhere, for debugging purposes
-        acq_conf = conf.get_acqui_conf()
-        fn = create_filename(acq_conf.pj_last_path, "{datelng}-{timelng}-superz", ".ome.tiff")
-        assert fn.endswith(".ome.tiff")
-
         # The angles of stigmatorAngle should come from MD_CALIB, so it's relatively safe
         poi_size = self._tab_data.poi_size.value
         fiducial_size = self._tab_data.fidcucial_size.value
@@ -322,13 +321,34 @@ class CryoZLocalizationController(object):
             pois = correlation_data.get("fm_pois", [])
             fiducials = correlation_data.get("fm_fiducials", [])
             # TODO add poi as current feature if no pot is available
-        # self._acq_future = z_localization.superz_manager(stigmator=._stigmator, focus= self._fo  logpath=fn)
+        self._acq_future = z_localization.superz_manager(stigmator=self._stigmator, focus= self._focus,
+                                                         poi_size=poi_size, stream=s, pois=pois,
+                                                         fiducials=fiducials)
         self._panel.btn_z_localization.SetLabel("Cancel")
 
         self._acq_future_connector = ProgressiveFutureConnector(self._acq_future,
                                                                 self._panel.gauge_z_localization)
 
-        self._acq_future.add_done_callback(self._on_measure_z_done)
+        self._acq_future.add_done_callback(self._on_superz_manager_done)
+
+    @call_in_wx_main
+    def _on_superz_manager_done(self, f):
+        """
+        Called when measure_z() is completed (can also happen if cancelled or failed)
+        """
+        try:
+            self._panel.btn_z_localization.Enable(True)
+            self._panel.btn_z_localization.SetLabel(self._localization_btn_label)
+            f.result()
+        except CancelledError:
+            logging.debug("Z localization cancelled")
+        finally:
+            self._panel.btn_z_localization.Enable()
+            self._panel.gauge_z_localization.Hide()
+            self._panel.lbl_z_localization.Show()
+            self._tab_data.main.is_acquiring.value = False
+            self._tab.streambar_controller.resume()
+            self._panel.Layout()
 
     def _start_z_localization(self):
         """
