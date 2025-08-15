@@ -103,6 +103,7 @@ class CryoZLocalizationController(object):
 
             self._panel.btn_z_localization.Bind(wx.EVT_BUTTON, self._on_z_localization)
             self._localization_btn_label = self._panel.btn_z_localization.GetLabel()
+            self._panel.btn_delete_target.Bind(wx.EVT_BUTTON, self._on_delete_target)
 
             # Fill the combobox with the available target sizes
             for size in sorted(tab_data.targetSize.choices):
@@ -162,6 +163,20 @@ class CryoZLocalizationController(object):
 
         # To disable the button during acquisition
         tab_data.main.is_acquiring.subscribe(self._check_button_available)
+
+    def _on_delete_target(self, event) -> None:
+        """
+        Deletes the currently selected target
+        """
+        if not self._tab_data.main.currentTarget.value:
+            return
+
+        for target in self._tab_data.main.targets.value:
+            if target.name.value == self._tab_data.main.currentTarget.value.name.value:
+                logging.debug(f"Deleting target: {target.name.value}")
+                self._tab_data.main.targets.value.remove(target)
+                self._tab_data.main.currentTarget.value = None
+                break
 
     def _cmb_stig_angle_get(self):
         """
