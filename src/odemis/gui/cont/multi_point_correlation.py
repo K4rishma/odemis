@@ -40,6 +40,7 @@ from odemis.acq.align.tdct import get_optimized_z_gauss, _convert_das_to_numpy_s
 from odemis.acq.feature import save_features, FIBFMCorrelationData, Target, TargetType
 from odemis.acq.stream import StaticFluoStream, StaticSEMStream, StaticStream, StaticFIBStream
 from odemis.gui import conf
+from odemis.gui.model import MicroscopyGUIData, CryoGUIData
 from odemis.gui.util import call_in_wx_main, wxlimit_invocation
 from odemis.model import ListVA
 from odemis.util.dataio import data_to_static_streams
@@ -60,6 +61,45 @@ GRID_PRECISION = 2  # Number of decimal places to display in the grid
 # Regex search pattern to distinguish between FIB and FM target. These targets can
 # have the same type of Fiducials but there is a prefix in the name to distinguish them.
 FIDUCIAL_PATTERN = r"^[^-]+-"
+
+
+def update_feature_correlation_target(correlation_target: FIBFMCorrelationData, tab_data:CryoGUIData, surface_fiducial:bool=False) -> FIBFMCorrelationData:
+    """
+    #TODO
+    Populate the correlation target based on the latest changes to save it.
+    :param surface_fiducial: (bool) True if the fib surface fiducial is present, False otherwise
+    """
+    if not correlation_target:
+        return None
+
+    if surface_fiducial:
+        fib_surface_fiducial = tab_data.fib_surface_point.value
+        correlation_target.fib_surface_fiducial = fib_surface_fiducial
+    else:
+        # Corner case: When fiducials are deleted and the indices are not continiuos. Then the fiducial pairs
+        # will be incorrectly matched together.
+        # TODO Handle the corner case
+        fib_fiducials = []
+        fm_fiducials = []
+        correlation_target.fm_pois = []
+        for target in tab_data.main.targets.value:
+            if target.name.value.startswith("FIB"):
+                fib_fiducials.append(target)
+            elif target.name.value.startswith("FM"):
+                fm_fiducials.append(target)
+            elif target.name.value.startswith("POI"):
+                correlation_target.fm_pois.append(target)
+        if fib_fiducials:
+            fib_fiducials.sort(key=lambda x: x.index.value)
+        correlation_target.fib_fiducials = fib_fiducials
+        if fm_fiducials:
+            fm_fiducials.sort(key=lambda x: x.index.value)
+        correlation_target.fm_fiducials = fm_fiducials
+
+    acq_conf = conf.get_acqui_conf()
+    save_features(acq_conf.pj_last_path, tab_data.main.features.value)
+
+    return correlation_target
 
 
 class CorrelationPointsController:
@@ -327,41 +367,6 @@ class CorrelationPointsController:
             # For other keys, allow the default behavior
             event.Skip()
 
-    def _update_feature_correlation_target(self, surface_fiducial=False) -> None:
-        """
-        Populate the correlation target based on the latest changes to save it.
-        :param surface_fiducial: (bool) True if the fib surface fiducial is present, False otherwise
-        """
-        if not self.correlation_target:
-            return
-
-        if surface_fiducial:
-            fib_surface_fiducial = self._tab_data_model.fib_surface_point.value
-            self.correlation_target.fib_surface_fiducial = fib_surface_fiducial
-        else:
-            # Corner case: When fiducials are deleted and the indices are not continiuos. Then the fiducial pairs
-            # will be incorrectly matched together.
-            # TODO Handle the corner case
-            fib_fiducials = []
-            fm_fiducials = []
-            self.correlation_target.fm_pois = []
-            for target in self._tab_data_model.main.targets.value:
-                if target.name.value.startswith("FIB"):
-                    fib_fiducials.append(target)
-                elif target.name.value.startswith("FM"):
-                    fm_fiducials.append(target)
-                elif target.name.value.startswith("POI"):
-                    self.correlation_target.fm_pois.append(target)
-            if fib_fiducials:
-                fib_fiducials.sort(key=lambda x: x.index.value)
-                self.correlation_target.fib_fiducials = fib_fiducials
-            if fm_fiducials:
-                fm_fiducials.sort(key=lambda x: x.index.value)
-                self.correlation_target.fm_fiducials = fm_fiducials
-
-        acq_conf = conf.get_acqui_conf()
-        save_features(acq_conf.pj_last_path, self._tab_data_model.main.features.value)
-
     def check_correlation_conditions(self) -> bool:
         """
         Minimum 4 FIB and FM fiducials and 1 POI in FM are required to run the correlation.
@@ -513,7 +518,7 @@ class CorrelationPointsController:
                         self.grid.SelectRow(-1)
                         break
 
-        self._update_feature_correlation_target()
+        self.correlation_target = update_feature_correlation_target(self.correlation_target, self._tab_data_model)
         if self.check_correlation_conditions():
             self._need_reprocessing()
 
@@ -687,7 +692,9 @@ class CorrelationPointsController:
         Update the coordinates of the fib surface fiducial and update the correlation result.
         :param coordinates: the coordinates of the fib surface fiducial
         """
-        self._update_feature_correlation_target(surface_fiducial=True)
+        self.correlation_target = update_feature_correlation_target(self.correlation_target,
+                                                                    self._tab_data_model,
+                                                                    surface_fiducial=True)
 
         # TODO add the logic to update the correlation result based on the fib surface fiducial
         # if self.check_correlation_conditions():
@@ -722,7 +729,8 @@ class CorrelationPointsController:
                     temp_check = True
                 self.grid.SetCellValue(row, GridColumns.X.value, f"{pixel_coords[0]:.{GRID_PRECISION}f}")
                 self.grid.SetCellValue(row, GridColumns.Y.value, f"{pixel_coords[1]:.{GRID_PRECISION}f}")
-                self._update_feature_correlation_target()
+                self.correlation_target = update_feature_correlation_target(self.correlation_target,
+                                                                            self._tab_data_model)
 
             if self.check_correlation_conditions() and temp_check:
                 self._need_reprocessing()

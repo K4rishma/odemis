@@ -26,20 +26,23 @@ This module contains classes to control the actions related to the acquisition
 of microscope images.
 
 """
-
+import itertools
 import logging
 import math
 from concurrent.futures._base import CancelledError
 
 import wx
+from scipy.linalg import hadamard
 
 from odemis import model
 from odemis.acq.align import z_localization
+from odemis.acq.feature import FIBFMCorrelationData, Target, TargetType, save_features
 from odemis.acq.move import FM_IMAGING
 from odemis.acq.stream import FluoStream
 from odemis.gui import conf
 from odemis.gui.comp import popup
-from odemis.gui.model import TOOL_FIDUCIAL
+from odemis.gui.cont.multi_point_correlation import update_feature_correlation_target
+from odemis.gui.model import TOOL_FIDUCIAL, TOOL_REGION_OF_INTEREST
 from odemis.gui.util import call_in_wx_main
 from odemis.gui.util.widgets import (
     ProgressiveFutureConnector,
@@ -60,7 +63,7 @@ class CryoZLocalizationController(object):
         self._tab = tab
         self._stigmator = tab_data.main.stigmator
         self._focus = tab_data.main.focus
-
+        self._viewports = panel.pnl_secom_grid.viewports
         # Note: there could be some (odd) configurations with a stigmator, but
         # no stigmator calibration (yet). In that case, we should still move the
         # stigmator to 0. Hence, it's before anything else.
@@ -70,7 +73,7 @@ class CryoZLocalizationController(object):
             self._stigmator.moveAbs({"rz": 0})
 
         # If the hardware doesn't support for Z localization, hide everything and don't control anything
-        if not hasattr(tab_data, "stigmatorAngle") and not hasattr(tab_data, "targetSize"):
+        if not hasattr(tab_data, "stigmatorAngle") and not hasattr(tab_data, "fiducial_size") and not hasattr(tab_data, "poi_size"):
             self._panel.btn_z_localization.Hide()
             self._panel.lbl_z_localization.Hide()
             self._panel.lbl_stigmator_angle.Hide()
@@ -106,16 +109,16 @@ class CryoZLocalizationController(object):
             self._panel.btn_delete_target.Bind(wx.EVT_BUTTON, self._on_delete_target)
 
             # Fill the combobox with the available target sizes
-            for size in sorted(tab_data.targetSize.choices):
+            for size in sorted(tab_data.fiducial_size.choices):
                 size_str = units.readable_str(size, unit="m")
                 self._panel.cmb_fiducial_size.Append(size_str, size)
 
-            for size in sorted(tab_data.targetSize.choices):
+            for size in sorted(tab_data.poi_size.choices):
                 size_str = units.readable_str(size, unit="m")
                 self._panel.cmb_poi_size.Append(size_str, size)
 
             self._cmb_vac_fiducial_size = VigilantAttributeConnector(
-                va=self._tab_data.fidcucial_size,
+                va=self._tab_data.fiducial_size,
                 value_ctrl=self._panel.cmb_fiducial_size,
                 events=wx.EVT_COMBOBOX,
                 va_2_ctrl=self._cmb_fiducial_size_set,
@@ -129,6 +132,8 @@ class CryoZLocalizationController(object):
                 va_2_ctrl=self._cmb_poi_size_set,
                 ctrl_2_va=self._cmb_poi_size_get
             )
+
+            self._tab_data.main.currentTarget.subscribe(self._on_current_target_changes)
 
         else:
             self._localization = self._start_z_localization
@@ -164,6 +169,29 @@ class CryoZLocalizationController(object):
         # To disable the button during acquisition
         tab_data.main.is_acquiring.subscribe(self._check_button_available)
 
+    @call_in_wx_main
+    def _on_current_target_changes(self, target):
+        # Update the text display of the current target
+        if target is None:
+            self._panel.lbl_select_target.SetLabel("No target selected")
+            self._panel.btn_delete_target.Enable(False)
+        else:
+            self._panel.lbl_select_target.SetLabel(f"Current target: {target.name.value}")
+            self._panel.btn_delete_target.Enable(True)
+
+            target = self._tab_data.main.currentTarget.value
+            if TargetType.PointOfInterest == target.type.value:
+                self.correlation_target.fm_pois.append(target)
+            else:
+                self.correlation_target.fm_fiducials.append(target)
+
+
+        # Update the correlation target
+        self.correlation_target = update_feature_correlation_target(self.correlation_target, self._tab_data)
+        # Refresh the viewports to show the selected target
+        for vp in self._viewports:
+            vp.canvas.update_drawing()
+
     def _on_delete_target(self, event) -> None:
         """
         Deletes the currently selected target
@@ -177,6 +205,12 @@ class CryoZLocalizationController(object):
                 self._tab_data.main.targets.value.remove(target)
                 self._tab_data.main.currentTarget.value = None
                 break
+
+        # Update the correlation target
+        self.correlation_target = update_feature_correlation_target(self.correlation_target, self._tab_data)
+        # Deletes the target from each viewport
+        for vp in self._viewports:
+            vp.canvas.update_drawing()
 
     def _cmb_stig_angle_get(self):
         """
@@ -252,6 +286,61 @@ class CryoZLocalizationController(object):
         # * Localization process is running
         # * TODO: there is a FluoStream
         has_feature = self._tab_data.main.currentFeature.value is not None
+        correlation_data = self._tab_data.main.currentFeature.value.correlation_data if self._tab_data.main.currentFeature.value else None
+        # Check if the correlation data is already present in the current feature
+        # and load the streams and targets accordingly, if not then initialize the correlation data
+        if TOOL_FIDUCIAL in self._tab_data.tool.choices:
+            tb = self._panel.secom_toolbar
+            if (correlation_data and
+                    (self._tab_data.main.currentFeature.value.status.value in correlation_data)):
+                self.correlation_target = correlation_data[
+                    self._tab_data.main.currentFeature.value.status.value]
+                # Maintain the order of loading. First check the streams and then load the targets. If no streams are
+                # present or the saved streams are not available, load all the relevant streams, and reset the fib and fm
+                # targets accordingly.
+
+                # Load the streams
+                # self.group_streams()
+                # self._add_stream_group()
+
+                # Load the targets
+                targets = []
+                if self.correlation_target.fm_fiducials:
+                    targets.append(self.correlation_target.fm_fiducials)
+                if self.correlation_target.fm_pois:
+                    targets.append(self.correlation_target.fm_pois)
+                # if self.correlation_target.fib_fiducials and self.correlation_target.fib_stream:
+                #     targets.append(self.correlation_target.fib_fiducials)
+                # flatten the list of lists
+                targets = list(
+                    itertools.chain.from_iterable([x] if not isinstance(x, list) else x for x in targets))
+                self._tab_data.main.targets.value = targets
+                # if self.correlation_target.fib_surface_fiducial:
+                #     self._tab_data.fib_surface_point.value = self.correlation_target.fib_surface_fiducial
+                tb.enable_button(TOOL_FIDUCIAL, True)
+                tb.enable_button(TOOL_REGION_OF_INTEREST, True)
+
+
+            elif not has_feature:
+                self._tab_data.main.currentTarget.value = None
+                self._tab_data.main.targets.value = []
+                self.correlation_target = None
+                tb.enable_button(TOOL_FIDUCIAL, False)
+                tb.enable_button(TOOL_REGION_OF_INTEREST, False)
+            else:
+                correlation_data[
+                    self._tab_data.main.currentFeature.value.status.value] = FIBFMCorrelationData()
+                self.correlation_target = correlation_data[
+                    self._tab_data.main.currentFeature.value.status.value]
+                self._tab_data.main.currentTarget.value = None
+                tb.enable_button(TOOL_FIDUCIAL, True)
+                tb.enable_button(TOOL_REGION_OF_INTEREST, True)
+                # self.group_streams()
+                # self._add_stream_group()
+
+            for vp in self._viewports:
+                vp.canvas.update_drawing()
+
         is_acquiring = self._tab_data.main.is_acquiring.value
         # While running the localization method
         # button turns in cancel button
