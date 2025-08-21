@@ -300,23 +300,25 @@ class CorrelationPointsController:
                 indices = self.stream_groups[fm_stream_key_tuple]
                 for index in indices:
                     stream = self.streams_list[index]
-                    das_interpolated = interpolate_z_stack(da=stream.raw[0], method="linear")
-                    stream_interpolated = StaticFluoStream(stream.name.value, das_interpolated)
-                    self.streams_list[index] = stream_interpolated
-                    ssc = self._panel.streambar_controller.addStream(stream_interpolated, play=False)
+                    # das_interpolated = interpolate_z_stack(da=stream.raw[0], method="linear")
+                    # stream_interpolated = StaticFluoStream(stream.name.value, das_interpolated)
+                    # self.streams_list[index] = stream_interpolated
+                    self.streams_list[index] = stream
+                    ssc = self._panel.streambar_controller.addStream(self.streams_list[index], play=False)
                     ssc.stream_panel.set_visible(True)
                     ssc.stream_panel.collapse(False)
-                    self.correlation_target.fm_streams.append(stream_interpolated)
+                    self.correlation_target.fm_streams.append(self.streams_list[index])
         else:
             for insertion_index, (key, indices) in enumerate(self.stream_groups.items()):
                 for index in indices:
                     stream = self.streams_list[index]
                     if isinstance(stream, StaticFluoStream):
                         stream.name.value = f"{stream.name.value}-Group-{insertion_index}"
-                        das_interpolated = interpolate_z_stack(da=stream.raw[0], method="linear")
-                        stream_interpolated = StaticFluoStream(stream.name.value, das_interpolated)
-                        self.streams_list[index] = stream_interpolated
-                        self._panel.streambar_controller.addStream(stream_interpolated, play=False)
+                        # das_interpolated = interpolate_z_stack(da=stream.raw[0], method="linear")
+                        # stream_interpolated = StaticFluoStream(stream.name.value, das_interpolated)
+                        # self.streams_list[index] = stream_interpolated
+                        self.streams_list[index] = stream
+                        self._panel.streambar_controller.addStream(self.streams_list[index], play=False)
             # Update the group visibility based on the latest changes
             self._tab_data_model.views.value[0].stream_tree.flat.subscribe(self._on_fm_streams_visiblity, init=True)
 
@@ -784,7 +786,7 @@ class CorrelationPointsController:
 
         self._reorder_grid()
         self._panel.Layout()
-        self._update_feature_correlation_target()
+        self.correlation_target = update_feature_correlation_target(self.correlation_target, self._tab_data_model)
 
         for vp in self._viewports:
             vp.canvas.update_drawing()
@@ -803,12 +805,14 @@ class CorrelationPointsController:
             if not streams_projections:
                 wx.MessageBox("FM streams are not available for refining Z", "Error", wx.OK | wx.ICON_ERROR)
                 return
-            das = [stream_projection.stream.raw[0] for stream_projection in streams_projections]
             coords = self._tab_data_model.main.currentTarget.value.coordinates.value
             pixel_coords = self.correlation_target.fm_streams[0].getPixelCoordinates((coords[0], coords[1]),
                                                                                      check_bbox=False)
-            self._tab_data_model.main.currentTarget.value.coordinates.value[2] = float(get_optimized_z_gauss(das, int(
-                pixel_coords[0]), int(pixel_coords[1]), coords[2]))
+            # das = [stream_projection.stream.raw[0] for stream_projection in streams_projections]
+            # self._tab_data_model.main.currentTarget.value.coordinates.value[2] = float(get_optimized_z_gauss(das, int(
+            #     pixel_coords[0]), int(pixel_coords[1]), coords[2]))
+            das = [interpolate_z_stack(da=stream_projection.stream.raw[0][:,int(pixel_coords[1]):int(pixel_coords[1])+1, int(pixel_coords[0]):int(pixel_coords[0])+1], method="linear") for stream_projection in streams_projections]
+            self._tab_data_model.main.currentTarget.value.coordinates.value[2] = float(get_optimized_z_gauss(das, int(0), int(0), coords[2]))
 
     def _reorder_grid(self) -> None:
         """
