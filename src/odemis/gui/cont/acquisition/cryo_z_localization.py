@@ -291,35 +291,49 @@ class CryoZLocalizationController(object):
         # and load the streams and targets accordingly, if not then initialize the correlation data
         if TOOL_FIDUCIAL in self._tab_data.tool.choices:
             tb = self._panel.secom_toolbar
-            if (correlation_data and
-                    (self._tab_data.main.currentFeature.value.status.value in correlation_data)):
-                self.correlation_target = correlation_data[
-                    self._tab_data.main.currentFeature.value.status.value]
-                # Maintain the order of loading. First check the streams and then load the targets. If no streams are
-                # present or the saved streams are not available, load all the relevant streams, and reset the fib and fm
-                # targets accordingly.
+            if has_feature:
+                feature = self._tab_data.main.currentFeature.value
+                streams = feature.streams.value
+                if feature.superz_stream_name:
+                    self._selected_stream = next((s for s in streams if isinstance(s, FluoStream) and
+                                                  s.name.value == feature.superz_stream_name), None)
 
-                # Load the streams
-                # self.group_streams()
-                # self._add_stream_group()
+                if (correlation_data and
+                        (self._tab_data.main.currentFeature.value.status.value in correlation_data)):
+                    self.correlation_target = correlation_data[
+                        self._tab_data.main.currentFeature.value.status.value]
+                    # Maintain the order of loading. First check the streams and then load the targets. If no streams are
+                    # present or the saved streams are not available, load all the relevant streams, and reset the fib and fm
+                    # targets accordingly.
 
-                # Load the targets
-                targets = []
-                if self.correlation_target.fm_fiducials:
-                    targets.append(self.correlation_target.fm_fiducials)
-                if self.correlation_target.fm_pois:
-                    targets.append(self.correlation_target.fm_pois)
-                # if self.correlation_target.fib_fiducials and self.correlation_target.fib_stream:
-                #     targets.append(self.correlation_target.fib_fiducials)
-                # flatten the list of lists
-                targets = list(
-                    itertools.chain.from_iterable([x] if not isinstance(x, list) else x for x in targets))
-                self._tab_data.main.targets.value = targets
-                # if self.correlation_target.fib_surface_fiducial:
-                #     self._tab_data.fib_surface_point.value = self.correlation_target.fib_surface_fiducial
-                tb.enable_button(TOOL_FIDUCIAL, True)
-                tb.enable_button(TOOL_REGION_OF_INTEREST, True)
+                    # Load the streams
+                    # self.group_streams()
+                    # self._add_stream_group()
 
+                    # Load the targets
+                    targets = []
+                    if self.correlation_target.fm_fiducials:
+                        targets.append(self.correlation_target.fm_fiducials)
+                    if self.correlation_target.fm_pois:
+                        targets.append(self.correlation_target.fm_pois)
+                    # if self.correlation_target.fib_fiducials and self.correlation_target.fib_stream:
+                    #     targets.append(self.correlation_target.fib_fiducials)
+                    # flatten the list of lists
+                    targets = list(
+                        itertools.chain.from_iterable([x] if not isinstance(x, list) else x for x in targets))
+                    self._tab_data.main.targets.value = targets
+                    # if self.correlation_target.fib_surface_fiducial:
+                    #     self._tab_data.fib_surface_point.value = self.correlation_target.fib_surface_fiducial
+                    tb.enable_button(TOOL_FIDUCIAL, True)
+                    tb.enable_button(TOOL_REGION_OF_INTEREST, True)
+                else:
+                    correlation_data[
+                        self._tab_data.main.currentFeature.value.status.value] = FIBFMCorrelationData()
+                    self.correlation_target = correlation_data[
+                        self._tab_data.main.currentFeature.value.status.value]
+                    self._tab_data.main.currentTarget.value = None
+                    tb.enable_button(TOOL_FIDUCIAL, True)
+                    tb.enable_button(TOOL_REGION_OF_INTEREST, True)
 
             elif not has_feature:
                 self._tab_data.main.currentTarget.value = None
@@ -327,16 +341,6 @@ class CryoZLocalizationController(object):
                 self.correlation_target = None
                 tb.enable_button(TOOL_FIDUCIAL, False)
                 tb.enable_button(TOOL_REGION_OF_INTEREST, False)
-            else:
-                correlation_data[
-                    self._tab_data.main.currentFeature.value.status.value] = FIBFMCorrelationData()
-                self.correlation_target = correlation_data[
-                    self._tab_data.main.currentFeature.value.status.value]
-                self._tab_data.main.currentTarget.value = None
-                tb.enable_button(TOOL_FIDUCIAL, True)
-                tb.enable_button(TOOL_REGION_OF_INTEREST, True)
-                # self.group_streams()
-                # self._add_stream_group()
 
             for vp in self._viewports:
                 vp.canvas.update_drawing()
@@ -382,6 +386,12 @@ class CryoZLocalizationController(object):
         """Get and save the stream option when an aption is selected in the pop-up menu"""
         menu_id = evt.GetId()
         self._selected_stream = self._menu_to_stream[menu_id]
+        feature = self._tab_data.main.currentFeature.value
+        feature.superz_stream_name = self._selected_stream.name.value
+
+        # Save the stream name in the config file
+        acq_conf = conf.get_acqui_conf()
+        save_features(acq_conf.pj_last_path, feature)
 
     def _on_z_localization(self, evt):
         """Start or cancel the localization method when the button is clicked"""
