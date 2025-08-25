@@ -127,6 +127,9 @@ class CorrelationPointsController:
         self.z_targeting_btn = self._panel.btn_z_targeting
         self.z_targeting_btn.Bind(wx.EVT_BUTTON, self._on_z_targeting)
         self.z_targeting_btn.Enable(False)
+        # Disable Z-targeting button if super z stream is available as Z-targeting is not required in that case
+        if self._tab_data_model.main.currentFeature.value.superz_stream_name:
+            self.z_targeting_btn.Hide()
 
         self.delete_btn = self._panel.btn_delete_row
         self.delete_btn.Bind(wx.EVT_BUTTON, self._on_delete_row)
@@ -176,6 +179,7 @@ class CorrelationPointsController:
         for stream in self._tab_data_model.main.currentFeature.value.streams.value:
             if isinstance(stream, StaticFluoStream) and hasattr(stream, "zIndex"):
                 streams_list.append(StaticFluoStream(stream.name.value, stream.raw[0]))
+
 
         self.streams_list = streams_list
         correlation_data = self._tab_data_model.main.currentFeature.value.correlation_data

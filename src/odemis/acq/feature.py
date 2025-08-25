@@ -179,6 +179,9 @@ class CryoFeature(object):
         self.path: str = None  # TODO:support path creation here, rather than on milling data save
         self.reference_image: model.DataArray = None
 
+        # Save the stream used for SuperZ workflow
+        self.superz_stream_name: str = None
+
     def set_posture_position(self, posture: str, position: Dict[str, float]) -> None:
         """
         Set the stage position for the given posture.
@@ -280,8 +283,8 @@ def get_features_dict(features: List[CryoFeature]) -> Dict[str, str]:
                         'fm_focus_position': feature.fm_focus_position.value,
                         'posture_positions': feature.posture_positions,
                         "milling_tasks": {k: v.to_dict() for k, v in feature.milling_tasks.items()},
-                        'correlation_data': {k: v.to_dict() for k, v in feature.correlation_data.items()} if feature.correlation_data  else {
-            }}
+                        'correlation_data': {k: v.to_dict() for k, v in feature.correlation_data.items()} if feature.correlation_data  else {},
+                        'superz_stream_name': feature.superz_stream_name}
         if feature.path:
             feature_item['path'] = feature.path
         flist.append(feature_item)
