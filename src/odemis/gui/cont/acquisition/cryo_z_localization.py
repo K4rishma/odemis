@@ -133,8 +133,6 @@ class CryoZLocalizationController(object):
                 ctrl_2_va=self._cmb_poi_size_get
             )
 
-            self._tab_data.main.currentTarget.subscribe(self._on_current_target_changes)
-
         else:
             self._localization = self._start_z_localization
             self._panel.lbl_fiducial_size.Hide()
@@ -162,6 +160,9 @@ class CryoZLocalizationController(object):
                 ctrl_2_va=self._cmb_stig_angle_get
             )
             self._acq_future_connector = None  # ProgressiveFutureConnector, if running
+
+        # To check if a target is selected
+        self._tab_data.main.currentTarget.subscribe(self._on_current_target_changes)
 
         # To check that a feature is selected
         tab_data.main.currentFeature.subscribe(self._check_button_available, init=True)
