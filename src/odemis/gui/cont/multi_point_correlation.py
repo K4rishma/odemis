@@ -47,7 +47,7 @@ from odemis.util.dataio import data_to_static_streams
 from odemis.util.interpolation import interpolate_z_stack
 from odemis.util.units import readable_str
 
-
+OLD_INTERPOLATION = False
 # create an enum with column labels and position
 class GridColumns(Enum):
     Type = 0  # Column for "type"
@@ -464,14 +464,12 @@ class CorrelationPointsController:
             fib_coords.append(fib_coord)
         fib_coords = numpy.array(fib_coords, dtype=numpy.float32)
         for fm_coord in self.correlation_target.fm_fiducials:
-            fm_coord_2d = self.correlation_target.fm_streams[0].getPixelCoordinates(fm_coord.coordinates.value[0:2],
-                                                                                    check_bbox=False)
-            fm_coords.append([fm_coord_2d[0], fm_coord_2d[1], fm_coord.coordinates.value[2]])
+            fm_coord_px = self.correlation_target.fm_streams[0].getPixel3DCoordinates(fm_coord.coordinates.value)
+            fm_coords.append(fm_coord_px)
         fm_coords = numpy.array(fm_coords, dtype=numpy.float32)
         poi_coord = self.correlation_target.fm_pois[0]
-        poi_coord_2d = self.correlation_target.fm_streams[0].getPixelCoordinates(poi_coord.coordinates.value[0:2],
-                                                                                 check_bbox=False)
-        poi_coords.append([poi_coord_2d[0], poi_coord_2d[1], poi_coord.coordinates.value[2]])
+        poi_coord_px = self.correlation_target.fm_streams[0].getPixel3DCoordinates(poi_coord.coordinates.value)
+        poi_coords.append(poi_coord_px)
         poi_coords = numpy.array(poi_coords, dtype=numpy.float32)
         # Run the correlation
         self.correlation_target.correlation_result = run_tdct_correlation(fib_coords=fib_coords, fm_coords=fm_coords,
@@ -722,13 +720,16 @@ class CorrelationPointsController:
                     pixel_coords = self.correlation_target.fib_stream.getPixelCoordinates(
                         (target.coordinates.value[0], target.coordinates.value[1]), check_bbox=False)
                 else:
-                    pixel_coords = self.correlation_target.fm_streams[0].getPixelCoordinates(
-                        (target.coordinates.value[0], target.coordinates.value[1]), check_bbox=False)
+                    # if (self.grid.GetCellValue(row,
+                    #                            GridColumns.Z.value)) != f"{float(target.coordinates.value[2]):.{GRID_PRECISION}f}":
+                    #     temp_check = True
+                    # self.grid.SetCellValue(row, GridColumns.Z.value,
+                    #                        f"{target.coordinates.value[2]:.{GRID_PRECISION}f}")
+                    pixel_coords = self.correlation_target.fm_streams[0].getPixel3DCoordinates(target.coordinates.value)
                     if (self.grid.GetCellValue(row,
-                                               GridColumns.Z.value)) != f"{float(target.coordinates.value[2]):.{GRID_PRECISION}f}":
+                                               GridColumns.Z.value)) != f"{pixel_coords[2]:.{GRID_PRECISION}f}":
                         temp_check = True
-                    self.grid.SetCellValue(row, GridColumns.Z.value,
-                                           f"{target.coordinates.value[2]:.{GRID_PRECISION}f}")
+                    self.grid.SetCellValue(row, GridColumns.Z.value, f"{pixel_coords[2]:.{GRID_PRECISION}f}")
                 # Get cell value
                 if (self.grid.GetCellValue(row, GridColumns.X.value) != f"{pixel_coords[0]:.{GRID_PRECISION}f}" or
                         self.grid.GetCellValue(row, GridColumns.Y.value) != f"{pixel_coords[1]:.{GRID_PRECISION}f}"):
@@ -776,10 +777,12 @@ class CorrelationPointsController:
                     (target.coordinates.value[0], target.coordinates.value[1]), check_bbox=False)
                 self.grid.SetCellValue(current_row_count, GridColumns.Z.value, "")
             else:
-                pixel_coords = self.correlation_target.fm_streams[0].getPixelCoordinates(
-                    (target.coordinates.value[0], target.coordinates.value[1]), check_bbox=False)
+                # self.grid.SetCellValue(current_row_count, GridColumns.Z.value,
+                #                        f"{target.coordinates.value[2]:.{GRID_PRECISION}f}")
+                pixel_coords = self.correlation_target.fm_streams[0].getPixel3DCoordinates(
+                    target.coordinates.value)
                 self.grid.SetCellValue(current_row_count, GridColumns.Z.value,
-                                       f"{target.coordinates.value[2]:.{GRID_PRECISION}f}")
+                                       f"{pixel_coords[2]:.{GRID_PRECISION}f}")
             # Set x and y position in the grid
             self.grid.SetCellValue(current_row_count, GridColumns.X.value,
                                    f"{pixel_coords[0]:.{GRID_PRECISION}f}")
@@ -810,13 +813,19 @@ class CorrelationPointsController:
                 wx.MessageBox("FM streams are not available for refining Z", "Error", wx.OK | wx.ICON_ERROR)
                 return
             coords = self._tab_data_model.main.currentTarget.value.coordinates.value
-            pixel_coords = self.correlation_target.fm_streams[0].getPixelCoordinates((coords[0], coords[1]),
-                                                                                     check_bbox=False)
+            # pixel_coords = self.correlation_target.fm_streams[0].getPixelCoordinates((coords[0], coords[1]),
+            #                                                                          check_bbox=False)
             # das = [stream_projection.stream.raw[0] for stream_projection in streams_projections]
             # self._tab_data_model.main.currentTarget.value.coordinates.value[2] = float(get_optimized_z_gauss(das, int(
             #     pixel_coords[0]), int(pixel_coords[1]), coords[2]))
-            das = [interpolate_z_stack(da=stream_projection.stream.raw[0][:,int(pixel_coords[1]):int(pixel_coords[1])+1, int(pixel_coords[0]):int(pixel_coords[0])+1], method="linear") for stream_projection in streams_projections]
-            self._tab_data_model.main.currentTarget.value.coordinates.value[2] = float(get_optimized_z_gauss(das, int(0), int(0), coords[2]))
+            pixel_coords = self.correlation_target.fm_streams[0].getPixel3DCoordinates(coords)
+            das = [interpolate_z_stack(da=stream_projection.stream.raw[0][:,int(pixel_coords[1]):int(pixel_coords[1])+1,
+                   int(pixel_coords[0]):int(pixel_coords[0])+1], method="linear")
+                   for stream_projection in streams_projections]
+            self._tab_data_model.main.currentTarget.value.coordinates.value[2] = float(get_optimized_z_gauss(das,
+                                                                                                             int(0),
+                                                                                                             int(0),
+                                                                                                             coords[2]))
 
     def _reorder_grid(self) -> None:
         """

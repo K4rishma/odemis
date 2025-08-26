@@ -488,11 +488,11 @@ class CryoLocalizationGUIData(CryoGUIData):
         if type == TargetType.Fiducial:
             t_name = make_unique_name("FM-1", existing_names)
             index = int(re.search(TARGET_INDEX, t_name).group(1))
-            target = Target(x, y, z=0, name=t_name, type=type,
+            target = Target(x, y, z=fm_focus_position, name=t_name, type=type,
                             index=index, fm_focus_position=fm_focus_position)
 
         elif type == TargetType.PointOfInterest:
-            target = Target(x, y, z=0, name="POI-1", type=type,
+            target = Target(x, y, z=fm_focus_position, name="POI-1", type=type,
                             index=1, fm_focus_position=fm_focus_position)
 
         self.main.targets.value.append(target)

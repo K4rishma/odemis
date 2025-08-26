@@ -1292,6 +1292,43 @@ class Stream(object):
                 return None
         return pixel_pos
 
+    def getPixel3DCoordinates(self, p_pos: Tuple[float, float, float]) -> Optional[Tuple[float, float, float]]:
+        """
+        Translate physical coordinates into data pixel coordinates
+        :param p_pos: the position in physical coordinates (m)
+        :returns: the x, y and z position in pixel coordinates or None if it's outside of the image and check_boundary is True
+        """
+        if not self.raw:
+            raise LookupError("Stream has no data")
+        raw = self.raw[0]
+        p_pos_z = p_pos[2]
+        p_pos = p_pos[0:2]
+        md = self._find_metadata(raw.metadata)
+        pxs = md.get(model.MD_PIXEL_SIZE, (1e-6, 1e-6))
+        # For multipoint correlation, we assume that the pixel size in x is the same as in y
+        if abs(pxs[0]-pxs[1])>1e-9:
+            logging.warning("Pixel size in x and y are not equal while computing pixel coordinates")
+        pxs = pxs[:2]  # Take only X & Y, even if Z is available
+        rotation = md.get(model.MD_ROTATION, 0)
+        shear = md.get(model.MD_SHEAR, 0)
+        translation = md.get(model.MD_POS, (0, 0))
+        translation = translation[:2]  # Take only X & Y, even if Z is available
+        size = raw.shape[-1], raw.shape[-2]
+        # The `pxs`, `rotation` and `shear` arguments are not directly passed
+        # in the `AffineTransform` because the formula of the `AffineTransform`
+        # uses a different definition of shear.
+        matrix = alt_transformation_matrix_from_implicit(pxs, rotation, -shear, "RSL")
+        tform = AffineTransform(matrix, translation)
+        pixel_pos_c = tform.inverse().apply(p_pos)
+        # MD_POS is the center of the image, so subtract half of the size to convert to pixel-coordinates
+        # A "-" is used for the y coordinate because Y axis has the opposite direction in physical coordinates
+        # For , p_pos_z is the focus position and translation[2] is the z position of the image center. We find z in pixel
+        # coordinates by enforcing the iso-voxel condition between x,y and z
+        translation = md.get(model.MD_POS, (0, 0, 0))
+        z = (p_pos_z - translation[2])/pxs[1]  + raw.shape[-2]/2
+        pixel_pos = (pixel_pos_c[0] + size[0] / 2, - (pixel_pos_c[1] - size[1] / 2), z)
+        return pixel_pos
+
     def getPhysicalCoordinates(self, pixel_pos: Tuple[float, float]) -> Optional[Tuple[float, float]]:
         """
         Translate pixel coordinates into physical coordinates in meters.
