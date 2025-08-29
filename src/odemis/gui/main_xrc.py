@@ -866,7 +866,6 @@ class xrcpnl_tab_fibsem(wx.Panel):
         self.btn_acquire_all = xrc.XRCCTRL(self, "btn_acquire_all")
         self.btn_acquire_overview = xrc.XRCCTRL(self, "btn_acquire_overview")
         self.btn_tdct = xrc.XRCCTRL(self, "btn_tdct")
-        self.txt_tdct = xrc.XRCCTRL(self, "txt_tdct")
         self.fp_acquired = xrc.XRCCTRL(self, "fp_acquired")
         self.pnl_cryosecom_acquired = xrc.XRCCTRL(self, "pnl_cryosecom_acquired")
         self.fp_milling = xrc.XRCCTRL(self, "fp_milling")
@@ -10475,14 +10474,6 @@ WX\x02\x18cT\xdb\xddv\x8f\x88\xba\xc2n\xe7\xa7D\xec\x03(\xb3s"\xadI\x9c\
                                       <assign_var>1</assign_var>
                                     </XRCED>
                                   </object>
-                                </object>
-                                <object class="sizeritem">
-                                  <object class="wxStaticText" name="txt_tdct">
-                                    <fg>#E5E5E5</fg>
-                                    <hidden>1</hidden>
-                                  </object>
-                                  <flag>wxLEFT</flag>
-                                  <border>10</border>
                                 </object>
                                 <orient>wxHORIZONTAL</orient>
                                 <flag>wxTOP</flag>

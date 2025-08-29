@@ -183,11 +183,8 @@ class CryoAcquiController(object):
 
         # fibsem specific acquisition settings
         if self.acqui_mode is guimod.AcquiMode.FIBSEM:
-            self.txt_tdct = self._panel.txt_tdct
-            self.txt_tdct.Show(LICENCE_CORRELATION_ENABLED)
             self._panel.btn_tdct.Show(LICENCE_CORRELATION_ENABLED)
             self._panel.btn_tdct.Enable(False)
-            self._panel.txt_tdct.Enable(False)
             self._panel.btn_tdct.Bind(wx.EVT_BUTTON, self._on_tdct)
             self._panel.btn_acquire_all.Bind(wx.EVT_BUTTON, self._on_acquire)
             self._panel.chkbox_save_acquisition.Bind(wx.EVT_CHECKBOX, self._on_chkbox_save_acquisition)
@@ -224,7 +221,6 @@ class CryoAcquiController(object):
             and any(isinstance(s, StaticFluoStream) and hasattr(s, "zIndex") for s in current_feature.streams.value)
         )
         self._panel.btn_tdct.Enable(tdct_available)
-        self._panel.txt_tdct.Enable(tdct_available)
 
     @call_in_wx_main
     def _on_acquisition(self, is_acquiring: bool):
@@ -785,14 +781,12 @@ class CryoAcquiController(object):
         for stream in self._tab_data.main.currentFeature.value.streams.value:
             if isinstance(stream, StaticFluoStream) and getattr(stream, "zIndex", None):
                 z_stack = True
-                self.txt_tdct.SetLabel("Interpolation of Z stacks .... \nMay take a while")
                 wx.CallAfter(self._on_close_dialog, z_stack)
                 return  # Prevent continuing execution here
 
     def _on_close_dialog(self, z_stack):
         if z_stack:
             self.correlation_dialog_controller.open_correlation_dialog()
-            self.txt_tdct.SetLabel("")
 
             # redraw milling position
             fibsem_tab = self._tab_data.main.getTabByName("meteor-fibsem")

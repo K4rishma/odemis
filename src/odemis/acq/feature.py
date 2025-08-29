@@ -318,6 +318,7 @@ class FeaturesDecoder(json.JSONDecoder):
             feature.posture_positions = {int(k): v for k, v in posture_positions.items()} # convert keys to int
             feature.milling_tasks = {k: MillingTaskSettings.from_dict(v) for k, v in milling_task_json.items()}
             feature.path = obj.get('path', None)
+            feature.superz_stream_name = obj.get('superz_stream_name', None)
 
             # load the reference image
             if feature.path:

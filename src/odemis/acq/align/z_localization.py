@@ -381,23 +381,25 @@ def estimate_superz_manager(pois: List[Target], stream: FluoStream, fiducials: O
     return (MAX_ITERATIONS - 1) * total_targets * (3 + acqmng.estimateTime([stream]))
 
 def _run_superz_manager(f: ProgressiveFuture, stigmator, focus, poi_size: float, stream: FluoStream,
-                     pois: List[Target], fiducials: Optional[List[Target]] = None, fiducial_size: Optional[float] = None) -> None:
+                     pois: List[Target], fiducials: Optional[List[Target]] = None, fiducial_size: Optional[float] = None,
+                     logpath: Optional[str] = None) -> None:
     try:
         exporter = None
         targets = []
         calib_dict = {TargetType.PointOfInterest: {},
                       TargetType.Fiducial: {}}
-        try:
-            calib_dict[TargetType.PointOfInterest] = stigmator.getMetadata()[model.MD_CALIB][poi_size]
-            # Restricted the support for one poi
-            targets.append(pois[0])
-        except KeyError:
-            raise KeyError(f"No CALIB found for POI size {poi_size} m")
+        if pois:
+            try:
+                calib_dict[TargetType.PointOfInterest] = stigmator.getMetadata()[model.MD_CALIB][poi_size]
+                # Restricted the support for one poi
+                targets.append(pois[0])
+            except KeyError:
+                raise KeyError(f"No CALIB found for POI size {poi_size} m")
 
         if fiducials:
             try:
                 calib_dict[TargetType.Fiducial] = stigmator.getMetadata()[model.MD_CALIB][fiducial_size]
-                targets.append(fiducials)
+                targets.extend(fiducials)
             except KeyError:
                 raise KeyError(f"No CALIB found for fiducial size {fiducial_size} m")
 
@@ -437,6 +439,7 @@ def _run_superz_manager(f: ProgressiveFuture, stigmator, focus, poi_size: float,
                 # TODO do we need check the boundary box, if targets are placed on live stream?
                 pos = target.coordinates.value[0:2]  # (X, Y) in metres of the sample plane
                 pos_px = stream.getPixelCoordinates(pos, check_bbox=False)  # pixels<---metres
+                pos_px = tuple(int(x) for x in pos_px)
                 if pos_px is None:
                     raise ValueError(f"Target {target.name.value} position {pos} is outside of "
                                      f"current FoV {stream.getBoundingBox()}")
@@ -449,7 +452,7 @@ def _run_superz_manager(f: ProgressiveFuture, stigmator, focus, poi_size: float,
 
                 # Store the acquisition somewhere, for debugging purposes
                 acq_conf = conf.get_acqui_conf()
-                fn = create_filename(acq_conf.pj_last_path, "{datelng}-{timelng}-{target.name.value}-superz", ".ome.tiff")
+                fn = create_filename(acq_conf.pj_last_path, "{datelng}-{timelng}-superz", ".ome.tiff")
                 assert fn.endswith(".ome.tiff")
                 if not exporter:
                     exporter = dataio.find_fittest_converter(fn)

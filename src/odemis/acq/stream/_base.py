@@ -1325,9 +1325,38 @@ class Stream(object):
         # For , p_pos_z is the focus position and translation[2] is the z position of the image center. We find z in pixel
         # coordinates by enforcing the iso-voxel condition between x,y and z
         translation = md.get(model.MD_POS, (0, 0, 0))
-        z = (p_pos_z - translation[2])/pxs[1]  + raw.shape[-2]/2
+        z = (p_pos_z - translation[2])/pxs[1]  + raw.shape[0]/2
         pixel_pos = (pixel_pos_c[0] + size[0] / 2, - (pixel_pos_c[1] - size[1] / 2), z)
         return pixel_pos
+
+    def getPhysical3DCoordinates(self, pixel_pos: Tuple[float, float, float]) -> Optional[Tuple[float, float, float]]:
+        """
+        Translate pixel coordinates into physical coordinates in meters.
+        :param pixel_pos: the position in pixel coordinates (x, y)
+        :returns: the position in physical coordinates (x, y) in meters
+        :raises LookupError: if the stream has no data
+        """
+        if not self.raw:
+            raise LookupError("Stream has no data")
+        raw = self.raw[0]
+        md = self._find_metadata(raw.metadata)
+        pxs = md.get(model.MD_PIXEL_SIZE, (1e-6, 1e-6))[0:2]
+        rotation = md.get(model.MD_ROTATION, 0)
+        shear = md.get(model.MD_SHEAR, 0)
+        translation = md.get(model.MD_POS, (0, 0))[0:2]
+        size = raw.shape[-1], raw.shape[-2]
+        # The `pxs`, `rotation` and `shear` arguments are not directly passed
+        # in the `AffineTransform` because the formula of the `AffineTransform`
+        # uses a different definition of shear.
+        matrix = alt_transformation_matrix_from_implicit(pxs, rotation, -shear, "RSL")
+        tform = AffineTransform(matrix, translation)
+        # Convert pixel coordinates to physical coordinates
+        pixel_pos_c = (pixel_pos[0] - size[0] / 2, -(pixel_pos[1] - size[1] / 2))
+        p_pos = tform.apply(pixel_pos_c)
+
+        translation = md.get(model.MD_POS, (0, 0, 0))
+        p_pos_z = (pixel_pos[2] - raw.shape[0] / 2) * pxs[1] + translation[2]
+        return (p_pos[0], p_pos[1], p_pos_z)
 
     def getPhysicalCoordinates(self, pixel_pos: Tuple[float, float]) -> Optional[Tuple[float, float]]:
         """

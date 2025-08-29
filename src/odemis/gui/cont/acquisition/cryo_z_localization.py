@@ -294,7 +294,7 @@ class CryoZLocalizationController(object):
             tb = self._panel.secom_toolbar
             if has_feature:
                 feature = self._tab_data.main.currentFeature.value
-                streams = feature.streams.value
+                streams = self._tab_data.streams.value
                 if feature.superz_stream_name:
                     self._selected_stream = next((s for s in streams if isinstance(s, FluoStream) and
                                                   s.name.value == feature.superz_stream_name), None)
@@ -387,12 +387,13 @@ class CryoZLocalizationController(object):
         """Get and save the stream option when an aption is selected in the pop-up menu"""
         menu_id = evt.GetId()
         self._selected_stream = self._menu_to_stream[menu_id]
-        feature = self._tab_data.main.currentFeature.value
-        feature.superz_stream_name = self._selected_stream.name.value
+        if self._tab_data.main.currentFeature:
+            feature = self._tab_data.main.currentFeature.value
+            feature.superz_stream_name = self._selected_stream.name.value
 
-        # Save the stream name in the config file
-        acq_conf = conf.get_acqui_conf()
-        save_features(acq_conf.pj_last_path, self._tab_data.main.features.value)
+            # Save the stream name in the config file
+            acq_conf = conf.get_acqui_conf()
+            save_features(acq_conf.pj_last_path, self._tab_data.main.features.value)
 
     def _on_z_localization(self, evt):
         """Start or cancel the localization method when the button is clicked"""
@@ -416,6 +417,12 @@ class CryoZLocalizationController(object):
             raise ValueError("Select a feature first to specify the Z localization in X/Y")
         if self._tab_data.main.posture_manager.current_posture.value != FM_IMAGING:
             raise ValueError("The current posture is not FM imaging, cannot do Z localization")
+
+        feature.superz_stream_name = self._selected_stream.name.value
+        # Save the stream name in the config file
+        acq_conf = conf.get_acqui_conf()
+        save_features(acq_conf.pj_last_path, self._tab_data.main.features.value)
+
         stage_pos = feature.get_posture_position(FM_IMAGING)
         pos = self._tab_data.main.posture_manager.to_sample_stage_from_stage_position(stage_pos)
 
@@ -430,15 +437,16 @@ class CryoZLocalizationController(object):
 
         # The angles of stigmatorAngle should come from MD_CALIB, so it's relatively safe
         poi_size = self._tab_data.poi_size.value
-        fiducial_size = self._tab_data.fidcucial_size.value
-        correlation_data = self._tab_data.currentFeature.value.correlation_data[self._tab_data.currentFeature.value.status.value]
-        if correlation_data:
-            pois = correlation_data.get("fm_pois", [])
-            fiducials = correlation_data.get("fm_fiducials", [])
-            # TODO add poi as current feature if no pot is available
+        fiducial_size = self._tab_data.fiducial_size.value
+        correlation_data = self._tab_data.main.currentFeature.value.correlation_data[self._tab_data.main.currentFeature.value.status.value]
+        # if correlation_data:
+        pois = getattr(correlation_data, "fm_pois", [])
+        fiducials = getattr(correlation_data, "fm_fiducials", [])
+        # TODO add poi as current feature if no pot is available
         self._acq_future = z_localization.superz_manager(stigmator=self._stigmator, focus= self._focus,
-                                                         poi_size=poi_size, stream=s, pois=pois,
-                                                         fiducials=fiducials)
+                                                         poi_size=poi_size, stream=s,
+                                                         pois=pois, fiducials=fiducials,
+                                                         fiducial_size=fiducial_size)
         self._panel.btn_z_localization.SetLabel("Cancel")
 
         self._acq_future_connector = ProgressiveFutureConnector(self._acq_future,

@@ -822,10 +822,17 @@ class CorrelationPointsController:
             das = [interpolate_z_stack(da=stream_projection.stream.raw[0][:,int(pixel_coords[1]):int(pixel_coords[1])+1,
                    int(pixel_coords[0]):int(pixel_coords[0])+1], method="linear")
                    for stream_projection in streams_projections]
-            self._tab_data_model.main.currentTarget.value.coordinates.value[2] = float(get_optimized_z_gauss(das,
-                                                                                                             int(0),
-                                                                                                             int(0),
-                                                                                                             coords[2]))
+            # TOD0 get the coordinates and then convert it to pixels
+            # TODO make the thr test cases
+            # self._tab_data_model.main.currentTarget.value.coordinates.value[2] = float(get_optimized_z_gauss(das,
+            #                                                                                                  int(0),
+            #                                                                                                  int(0),
+            #                                                                                                  coords[2]))
+
+
+            z = float(get_optimized_z_gauss(das,int(0),int(0),coords[2]))
+            self._tab_data_model.main.currentTarget.value.coordinates.value[2] = self.correlation_target.fm_streams[0].getPhysical3DCoordinates((pixel_coords[0],
+                                                                                pixel_coords[1], z))[2]
 
     def _reorder_grid(self) -> None:
         """
