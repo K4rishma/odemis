@@ -130,6 +130,7 @@ class CorrelationPointsController:
         # Disable Z-targeting button if super z stream is available as Z-targeting is not required in that case
         if self._tab_data_model.main.currentFeature.value.superz_stream_name:
             self.z_targeting_btn.Hide()
+            self.refinez_active = False
 
         self.delete_btn = self._panel.btn_delete_row
         self.delete_btn.Bind(wx.EVT_BUTTON, self._on_delete_row)
@@ -660,12 +661,14 @@ class CorrelationPointsController:
         # For new targets, automatically perform Z targeting if MIP is checked for atleast one FM stream
         mip_enabled = any([stream.max_projection.value for stream in self.correlation_target.fm_streams])
 
-        if target and target.name.value.startswith("FIB"):
-            self.z_targeting_btn.Enable(False)
-        else:
-            self.z_targeting_btn.Enable(True)
-            if mip_enabled:
-                self._on_z_targeting(None)
+        # Refine z should be disabled with Super X module
+        if self.refinez_active:
+            if target and target.name.value.startswith("FIB"):
+                self.z_targeting_btn.Enable(False)
+            else:
+                self.z_targeting_btn.Enable(True)
+                if mip_enabled:
+                    self._on_z_targeting(None)
 
         for row in range(self.grid.GetNumberRows()):
             if self._selected_target_in_grid(target, row):
